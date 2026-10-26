@@ -42,7 +42,7 @@ export function genreAffinity(ratings) {
   return out;
 }
 
-function shape(type, d, region, includeRentBuy) {
+export function shape(type, d, region) {
   const p = d['watch/providers']?.results?.[region] ?? {};
   const pick = (list) => (list ?? []).map((x) => ({ id: x.provider_id, name: x.provider_name, logo: x.logo_path }));
   return {
@@ -60,26 +60,26 @@ function shape(type, d, region, includeRentBuy) {
     voteCount: d.vote_count,
     stream: pick(p.flatrate),
     free: pick([...(p.free ?? []), ...(p.ads ?? [])]),
-    rentBuy: includeRentBuy ? pick([...(p.rent ?? []), ...(p.buy ?? [])]) : [],
+    rentBuy: pick([...(p.rent ?? []), ...(p.buy ?? [])]),
     link: p.link ?? null,
   };
 }
 
 // Services the user has that carry this title.
-function matchServices(item, wanted, includeRentBuy) {
+export function matchServices(item, wanted, includeRentBuy) {
   const pool = [...item.stream, ...item.free, ...(includeRentBuy ? item.rentBuy : [])];
   const seen = new Set();
   return pool.filter((p) => wanted.has(p.id) && !seen.has(p.id) && seen.add(p.id));
 }
 
 // Titles added in the app already carry a TMDB id; IMDb imports need a lookup.
-async function resolve(tmdb, item) {
+export async function resolve(tmdb, item) {
   if (item.tmdbId) return { ...item, tmdbType: item.type };
   const hit = await tmdb.find(item.imdbId, item.type);
   return hit ? { ...item, tmdbId: hit.id, tmdbType: hit.type } : null;
 }
 
-function seenSet(items) {
+export function seenSet(items) {
   const s = new Set();
   for (const r of items) {
     if (r.imdbId) s.add(r.imdbId);
@@ -88,7 +88,7 @@ function seenSet(items) {
   return s;
 }
 
-const isSeen = (seen, item) =>
+export const isSeen = (seen, item) =>
   (item.imdbId && seen.has(item.imdbId)) || (item.tmdbId && seen.has(`${item.type}:${item.tmdbId}`));
 
 export async function recommend(tmdb, profile, { type = 'all', genre = null, limit = 30 } = {}) {
@@ -102,8 +102,10 @@ export async function recommend(tmdb, profile, { type = 'all', genre = null, lim
     .sort((a, b) => b.rating - a.rating)
     .slice(0, SEED_LIMIT);
   if (!seeds.length) return { items: [], reason: 'no-seeds' };
+  // Things you didn't like push their look-alikes down.
+  const disliked = rated.filter((r) => r.rating && r.rating <= 4).slice(0, SEED_LIMIT / 2);
 
-  const resolved = (await pool(seeds, CONCURRENCY, (s) => resolve(tmdb, s))).filter(Boolean);
+  const resolved = (await pool([...seeds, ...disliked], CONCURRENCY, (s) => resolve(tmdb, s))).filter(Boolean);
 
   // candidate key -> accumulated seed support
   const cands = new Map();
@@ -117,19 +119,19 @@ export async function recommend(tmdb, profile, { type = 'all', genre = null, lim
       const k = `${t}:${c.id}`;
       const e = cands.get(k) ?? { type: t, id: c.id, score: 0, because: [] };
       e.score += w * (1 - i / 40);
-      e.because.push(seed.title);
+      if (w > 0) e.because.push(seed.title);
       cands.set(k, e);
     });
   });
 
   const top = [...cands.values()]
-    .filter((c) => type === 'all' || c.type === type)
+    .filter((c) => c.score > 0 && (type === 'all' || c.type === type))
     .sort((a, b) => b.score - a.score)
     .slice(0, CANDIDATE_LIMIT);
 
   const detailed = await pool(top, CONCURRENCY, async (c) => {
     const d = await tmdb.details(c.type, c.id);
-    return d ? { c, item: shape(c.type, d, profile.region, profile.includeRentBuy) } : null;
+    return d ? { c, item: shape(c.type, d, profile.region) } : null;
   });
 
   const out = [];
@@ -171,7 +173,7 @@ export async function availableWatchlist(tmdb, profile) {
     if (!hit) return null;
     const d = await tmdb.details(hit.tmdbType, hit.tmdbId);
     if (!d) return null;
-    const item = shape(hit.tmdbType, d, profile.region, profile.includeRentBuy);
+    const item = shape(hit.tmdbType, d, profile.region);
     const services = wanted.size ? matchServices(item, wanted, profile.includeRentBuy) : [];
     const anywhere = item.stream.length + item.free.length > 0;
     return { ...item, services, available: wanted.size ? services.length > 0 : anywhere };

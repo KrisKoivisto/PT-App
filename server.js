@@ -4,7 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseImdbCsv } from './src/imdb.js';
 import { createTmdb } from './src/tmdb.js';
-import { recommend, availableWatchlist, genreAffinity } from './src/recommend.js';
+import { recommend, availableWatchlist, genreAffinity, shape, matchServices } from './src/recommend.js';
+import { browse, search, CATEGORIES } from './src/browse.js';
+import { REACTIONS, reactionOf, annotate } from './src/mine.js';
+import { pool } from './src/tmdb.js';
 import { JsonFile, defaultProfile } from './src/store.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -71,19 +74,57 @@ export async function createApp({ dataDir = path.join(root, 'data'), key = proce
       return { kind, count: items.length };
     },
 
-    'GET /api/search': async (req, url) => {
-      const q = (url.searchParams.get('q') || '').trim();
-      return q ? needKey().search(q) : [];
+    'GET /api/categories': async () => CATEGORIES.map(({ key, name }) => ({ key, name })),
+
+    'GET /api/browse': async (req, url) => {
+      const p = url.searchParams;
+      const r = await browse(needKey(), profile, {
+        category: p.get('category'),
+        type: ['movie', 'tv'].includes(p.get('type')) ? p.get('type') : 'all',
+        sort: p.get('sort') || 'popular',
+        page: Math.max(1, Math.min(500, Number(p.get('page')) || 1)),
+        onlyMine: p.get('onlyMine') === '1',
+        hideRated: p.get('hideRated') !== '0',
+      });
+      await cache.save();
+      return { ...r, items: annotate(profile, r.items) };
     },
 
-    'GET /api/titles': async () => ({
-      ratings: profile.ratings.filter((i) => i.source === 'manual'),
-      watchlist: profile.watchlist.filter((i) => i.source === 'manual'),
-    }),
+    'GET /api/search': async (req, url) => {
+      const q = (url.searchParams.get('q') || '').trim();
+      if (!q) return { items: [] };
+      const items = await search(needKey(), profile, q);
+      await cache.save();
+      return { items: annotate(profile, items) };
+    },
+
+    // Titles marked in the app, grouped by reaction, with where to watch.
+    'GET /api/titles': async (req, url) => {
+      const show = url.searchParams.get('show') || 'love';
+      const list = show === 'want'
+        ? profile.watchlist.filter((i) => i.tmdbId)
+        : profile.ratings.filter((i) => i.tmdbId && (i.reaction ?? reactionOf(i.rating)) === show);
+      const t = needKey();
+      const wanted = new Set(profile.services);
+      const items = (await pool(list.slice().reverse(), 8, async (i) => {
+        const d = await t.details(i.type, i.tmdbId);
+        if (!d) return null;
+        const item = shape(i.type, d, profile.region);
+        return { ...item, services: matchServices(item, wanted, profile.includeRentBuy) };
+      })).filter(Boolean);
+      await cache.save();
+      const counts = { love: 0, like: 0, dislike: 0, want: profile.watchlist.length };
+      for (const r of profile.ratings) {
+        const k = r.reaction ?? reactionOf(r.rating);
+        if (k) counts[k]++;
+      }
+      return { items: annotate(profile, items), counts };
+    },
 
     'POST /api/titles': async (req, url, body) => {
       const { list, type, tmdbId } = body;
-      const rating = Number(body.rating);
+      const reaction = REACTIONS[body.reaction] ? body.reaction : null;
+      const rating = reaction ? REACTIONS[reaction] : Number(body.rating);
       if (!['ratings', 'watchlist'].includes(list) || !['movie', 'tv'].includes(type) || !Number.isInteger(tmdbId)) {
         throw Object.assign(new Error('Bad title.'), { status: 400 });
       }
@@ -103,19 +144,25 @@ export async function createApp({ dataDir = path.join(root, 'data'), key = proce
         rating: list === 'ratings' ? rating : null,
         source: 'manual',
       };
+      if (list === 'ratings') {
+        item.reaction = reaction ?? reactionOf(rating);
+        item.reasons = (Array.isArray(body.reasons) ? body.reasons : [])
+          .filter((r) => typeof r === 'string' && r.trim()).map((r) => r.trim().slice(0, 40)).slice(0, 12);
+        item.note = typeof body.note === 'string' ? body.note.trim().slice(0, 300) : '';
+      }
       // Replace an existing entry for the same title, imported or not.
       const same = (i) => (i.tmdbId === tmdbId && i.type === type) || (item.imdbId && i.imdbId === item.imdbId);
       profile[list] = [...profile[list].filter((i) => !same(i)), item];
       // Rating something means you've watched it.
       if (list === 'ratings') profile.watchlist = profile.watchlist.filter((i) => !same(i));
       await Promise.all([profileFile.save(), cache.save()]);
-      return item;
+      return annotate(profile, [item])[0];
     },
 
     'POST /api/titles/remove': async (req, url, body) => {
-      const { list, type, tmdbId } = body;
+      const { list, type, tmdbId, imdbId } = body;
       if (!['ratings', 'watchlist'].includes(list)) throw Object.assign(new Error('Bad list.'), { status: 400 });
-      profile[list] = profile[list].filter((i) => !(i.tmdbId === tmdbId && i.type === type));
+      profile[list] = profile[list].filter((i) => !((i.tmdbId === tmdbId && i.type === type) || (imdbId && i.imdbId === imdbId)));
       await profileFile.save();
       return { ok: true };
     },
@@ -125,13 +172,13 @@ export async function createApp({ dataDir = path.join(root, 'data'), key = proce
       const genre = url.searchParams.get('genre') || null;
       const r = await recommend(needKey(), profile, { type, genre });
       await cache.save();
-      return r;
+      return { ...r, items: annotate(profile, r.items) };
     },
 
     'GET /api/watchlist': async () => {
       const items = await availableWatchlist(needKey(), profile);
       await cache.save();
-      return { items };
+      return { items: annotate(profile, items) };
     },
 
     'DELETE /api/profile': async () => {

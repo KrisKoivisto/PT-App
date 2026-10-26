@@ -56,6 +56,13 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
         }));
     },
 
+    discover: (type, params) => get(`/discover/${type}`, { include_adult: 'false', ...params }),
+
+    async genres(type) {
+      const r = await get(`/genre/${type}/list`);
+      return r?.genres ?? [];
+    },
+
     recommendations: (type, id) => get(`/${type}/${id}/recommendations`),
 
     // details + providers + imdb id in one request

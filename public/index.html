@@ -10,7 +10,8 @@
 <header>
   <h1>What to Watch</h1>
   <nav>
-    <button data-tab="foryou" class="on">For you</button>
+    <button data-tab="browse" class="on">Browse</button>
+    <button data-tab="foryou">For you</button>
     <button data-tab="watchlist">Watchlist</button>
     <button data-tab="mine">My titles</button>
     <button data-tab="setup">Setup</button>
@@ -18,7 +19,32 @@
 </header>
 
 <main>
-  <section id="foryou">
+  <section id="browse">
+    <form id="search-form" class="filters">
+      <input id="q" placeholder="Search any movie or show" autocomplete="off">
+      <button>Search</button>
+    </form>
+    <div id="cats" class="chips"></div>
+    <div class="filters small">
+      <select id="b-type">
+        <option value="all">Movies and shows</option>
+        <option value="movie">Movies</option>
+        <option value="tv">Shows</option>
+      </select>
+      <select id="b-sort">
+        <option value="popular">Most popular</option>
+        <option value="top">Highest rated</option>
+        <option value="new">Newest</option>
+      </select>
+      <label class="check"><input type="checkbox" id="b-mine"> Only my services</label>
+      <label class="check"><input type="checkbox" id="b-hide" checked> Hide ones I've rated</label>
+    </div>
+    <p id="browse-msg" class="msg">Pick a category or search for a title.</p>
+    <div id="browse-grid" class="grid"></div>
+    <button id="more" class="more" hidden>Show more</button>
+  </section>
+
+  <section id="foryou" hidden>
     <div class="filters">
       <select id="type">
         <option value="all">Movies and shows</option>
@@ -27,9 +53,9 @@
       </select>
       <input id="genre" placeholder="Genre (optional)" list="genres">
       <datalist id="genres"></datalist>
-      <button id="go">Find something</button>
+      <button id="go" class="primary">Find something</button>
     </div>
-    <p id="foryou-msg" class="msg"></p>
+    <p id="foryou-msg" class="msg">Based on everything you've loved and liked. Things you didn't like push similar titles down.</p>
     <div id="foryou-grid" class="grid"></div>
   </section>
 
@@ -39,46 +65,39 @@
   </section>
 
   <section id="mine" hidden>
-    <form id="search-form" class="filters">
-      <input id="q" placeholder="Search a movie or show you've seen or want to see" autocomplete="off">
-      <button id="search-btn">Search</button>
-    </form>
-    <p id="search-msg" class="msg">Rate what you've watched (1 to 10). Anything you rate 8 or higher drives your recommendations.</p>
-    <div id="results" class="rows"></div>
-
-    <h2>Rated here</h2>
-    <div id="mine-ratings" class="rows"></div>
-    <h2>Want to watch</h2>
-    <div id="mine-watchlist" class="rows"></div>
+    <div id="mine-tabs" class="chips"></div>
+    <p id="mine-msg" class="msg"></p>
+    <div id="mine-grid" class="grid"></div>
   </section>
 
   <section id="setup" hidden>
     <div class="card">
-      <h2>1. Import from IMDb (optional)</h2>
-      <p>You can skip this and add titles on the My titles tab instead. If you do have IMDb history, this uses their CSV export. On IMDb, open <b>Your Ratings</b>, click the three dots, and choose <b>Export</b>. Do the same on your <b>Watchlist</b>. Importing again replaces the old data.</p>
+      <h2>Your streaming services</h2>
+      <p>Netflix, Disney+ and the rest don't let other apps see your account, so tick what you pay for. Those get a ring on every card.</p>
+      <label>Country
+        <select id="region"></select>
+      </label>
+      <label class="check"><input type="checkbox" id="rentbuy"> Count rent/buy as available</label>
+      <div id="providers" class="providers"></div>
+      <p id="settings-msg" class="msg"></p>
+    </div>
+
+    <div class="card">
+      <h2>Import from IMDb (optional)</h2>
+      <p>If you have IMDb history: open Your Ratings (or your Watchlist), click the three dots, choose Export, and upload the file here. Importing again replaces the last import but keeps everything you marked in this app.</p>
       <label class="file">Ratings CSV <input type="file" accept=".csv" data-import></label>
       <label class="file">Watchlist CSV <input type="file" accept=".csv" data-import></label>
       <p id="import-msg" class="msg"></p>
     </div>
 
     <div class="card">
-      <h2>2. Your streaming services</h2>
-      <p>Netflix, Disney+ and the rest don't expose your account, so tick what you pay for.</p>
-      <label>Country
-        <select id="region"></select>
+      <h2>Taste</h2>
+      <label>Recommend from titles rated at least
+        <select id="minseed"></select>
       </label>
-      <label class="check"><input type="checkbox" id="rentbuy"> Also count rent/buy options</label>
-      <div id="providers" class="providers"></div>
-      <p id="settings-msg" class="msg"></p>
-    </div>
-
-    <div class="card">
-      <h2>3. Taste</h2>
-      <label>Use titles I rated at least
-        <select id="minseed"></select> as seeds
-      </label>
+      <p class="msg">Loved counts as 10, Liked as 8, Didn't like as 3.</p>
       <p id="taste" class="msg"></p>
-      <button id="reset" class="danger">Delete my imported data</button>
+      <button id="reset" class="danger">Delete my data</button>
     </div>
   </section>
 </main>
