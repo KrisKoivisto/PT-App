@@ -55,6 +55,14 @@ const DB = {
   '/tv/30': detail(30, 'Show Rec', 'tt0000030', [NETFLIX], { number_of_seasons: 3, runtime: undefined }),
   '/movie/10': detail(10, 'On Netflix', 'tt0000010', [NETFLIX]),
   '/movie/11': detail(11, 'Nowhere', 'tt0000011', []),
+  '/search/multi': { results: [
+    { id: 40, media_type: 'movie', title: 'Hand Picked', release_date: '2019-02-02', poster_path: '/p.jpg' },
+    { id: 99, media_type: 'person', name: 'Some Actor' },
+    { id: 41, media_type: 'tv', name: 'Hand Show', first_air_date: '2018-01-01' },
+  ] },
+  '/movie/40': detail(40, 'Hand Picked', 'tt0000040', [], { genres: [{ name: 'Science Fiction' }] }),
+  '/movie/40/recommendations': { results: [{ id: 21 }, { id: 40 }] },
+  '/tv/41': detail(41, 'Hand Show', null, [NETFLIX]),
   '/watch/providers/movie': { results: [{ provider_id: 8, provider_name: 'Netflix', logo_path: '/n.jpg', display_priorities: { US: 1 } }] },
   '/watch/providers/tv': { results: [{ provider_id: 15, provider_name: 'Hulu', logo_path: '/h.jpg', display_priorities: { US: 2 } }] },
 };
@@ -120,5 +128,44 @@ test('rejects bad input and missing key', async () => {
   try {
     assert.equal((await call('POST', '/api/import', { csv: 'nope' })).status, 500);
     assert.match((await call('GET', '/api/recommendations')).body.error, /TMDB_API_KEY/);
+  } finally { close(); }
+});
+
+test('manual titles: search, rate, watchlist, survive an IMDb re-import', async () => {
+  const { call, close } = await setup();
+  try {
+    const found = (await call('GET', '/api/search?q=hand')).body;
+    assert.deepEqual(found.map((f) => [f.title, f.type, f.year]), [['Hand Picked', 'movie', 2019], ['Hand Show', 'tv', 2018]]);
+
+    // Recommendations work with no IMDb data at all
+    assert.equal((await call('POST', '/api/titles', { list: 'watchlist', type: 'movie', tmdbId: 40 })).status, 200);
+    const rated = (await call('POST', '/api/titles', { list: 'ratings', type: 'movie', tmdbId: 40, rating: 9 })).body;
+    assert.equal(rated.imdbId, 'tt0000040');
+    let titles = (await call('GET', '/api/titles')).body;
+    assert.equal(titles.ratings.length, 1);
+    assert.equal(titles.watchlist.length, 0, 'rating a title takes it off the watchlist');
+
+    const recs = (await call('GET', '/api/recommendations')).body.items;
+    assert.deepEqual(recs.map((r) => r.title), ['On Hulu Only']);
+    assert.deepEqual(recs[0].because, ['Hand Picked']);
+
+    // Show without an IMDb id still works on the watchlist
+    await call('POST', '/api/titles', { list: 'watchlist', type: 'tv', tmdbId: 41 });
+    const wl = (await call('GET', '/api/watchlist')).body.items;
+    assert.deepEqual(wl.map((w) => w.title), ['Hand Show']);
+
+    // Re-rating replaces instead of duplicating
+    await call('POST', '/api/titles', { list: 'ratings', type: 'movie', tmdbId: 40, rating: 7 });
+    titles = (await call('GET', '/api/titles')).body;
+    assert.deepEqual(titles.ratings.map((r) => r.rating), [7]);
+
+    await call('POST', '/api/import', { csv: RATINGS });
+    assert.equal((await call('GET', '/api/status')).body.ratings, 4);
+
+    await call('POST', '/api/titles/remove', { list: 'ratings', type: 'movie', tmdbId: 40 });
+    assert.equal((await call('GET', '/api/status')).body.ratings, 3);
+
+    assert.equal((await call('POST', '/api/titles', { list: 'ratings', type: 'movie', tmdbId: 40, rating: 11 })).status, 400);
+    assert.equal((await call('POST', '/api/titles', { list: 'ratings', type: 'movie', tmdbId: 12345, rating: 5 })).status, 404);
   } finally { close(); }
 });

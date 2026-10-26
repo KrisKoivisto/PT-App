@@ -37,4 +37,11 @@ nav button.on, #go { background: var(--accent); border-color: var(--accent); col
 .providers { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin-top: 8px; }
 .prov { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; font-size: .85rem; cursor: pointer; }
 .prov img { width: 24px; height: 24px; border-radius: 4px; }
+#q { flex: 1; min-width: 200px; }
+.rows { display: grid; gap: 6px; margin-bottom: 16px; }
+.row { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.row > img, .row > .noposter { width: 36px; height: 54px; object-fit: cover; border-radius: 3px; flex: none; }
+.row .name { flex: 1; min-width: 0; }
+.row .ctl { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+main h2 { margin: 20px 0 8px; font-size: 1rem; }
 footer { color: var(--muted); font-size: .75rem; padding-top: 24px; padding-bottom: 32px; }

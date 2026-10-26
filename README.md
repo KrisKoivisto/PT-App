@@ -14,7 +14,9 @@ No dependencies to install.
 
 ## How it works
 
-**IMDb.** IMDb has no personal API, so the app reads the CSV exports. On IMDb, open Your Ratings (and your Watchlist), click the three dots, and choose Export. Upload them on the Setup tab. Importing again replaces the old data.
+**Adding titles by hand.** On the My titles tab, search for anything you've watched and give it a 1 to 10 rating, or mark it "Want to watch". This is all the app needs, so IMDb is optional. Rating a watchlist title moves it off the watchlist.
+
+**IMDb (optional).** IMDb has no personal API, so the app reads the CSV exports. On IMDb, open Your Ratings (and your Watchlist), click the three dots, and choose Export. Upload them on the Setup tab. Importing again replaces the last import but keeps titles you added by hand.
 
 **Streaming apps.** Netflix, Disney+, Max and the others don't offer a way to read your account. Instead you tick the services you pay for, and availability comes from TMDB's watch-provider data, which is supplied by JustWatch. Pick your country first, since catalogs differ.
 

@@ -50,7 +50,7 @@ async function loadRecs() {
     const q = new URLSearchParams({ type: $('#type').value });
     if ($('#genre').value.trim()) q.set('genre', $('#genre').value.trim());
     const r = await api('/api/recommendations?' + q);
-    if (r.reason === 'no-seeds') return show('#foryou-msg', `Nothing rated ${status.minSeedRating}+ yet. Import your IMDb ratings on the Setup tab.`);
+    if (r.reason === 'no-seeds') return show('#foryou-msg', `Nothing rated ${status.minSeedRating}+ yet. Rate a few favorites on the My titles tab.`);
     if (!r.items.length) return show('#foryou-msg', status.services.length ? 'Nothing matched your services. Try a different filter, or turn on rent/buy.' : 'No results.');
     show('#foryou-msg', status.services.length ? '' : 'No services selected, so these are not filtered by what you can stream.');
     $('#foryou-grid').innerHTML = r.items.map(card).join('');
@@ -62,7 +62,7 @@ async function loadWatchlist() {
   show('#watchlist-msg', 'Checking…');
   try {
     const { items } = await api('/api/watchlist');
-    if (!items.length) return show('#watchlist-msg', 'Import your IMDb watchlist on the Setup tab.');
+    if (!items.length) return show('#watchlist-msg', 'Nothing here yet. Add titles on the My titles tab, or import your IMDb watchlist in Setup.');
     const ready = items.filter((i) => i.available);
     show('#watchlist-msg', `${ready.length} of ${items.length} are streaming now${status.services.length ? ' on your services' : ''}.`);
     $('#watchlist-grid').innerHTML = items.map((i) => `<div class="${i.available ? '' : 'dim'}">${card(i)}</div>`).join('');
@@ -102,6 +102,7 @@ document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click
   document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('on', x === b));
   document.querySelectorAll('main > section').forEach((s) => (s.hidden = s.id !== b.dataset.tab));
   if (b.dataset.tab === 'watchlist') loadWatchlist();
+  if (b.dataset.tab === 'mine') loadMine();
 }));
 
 $('#go').addEventListener('click', loadRecs);
@@ -132,6 +133,62 @@ $('#reset').addEventListener('click', async () => {
   await loadProviders();
 });
 
+// --- My titles ---------------------------------------------------------------
+const ratingSelect = (val) => `<select data-rate><option value="">Rate</option>${[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((n) => `<option ${n === val ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
+
+function row(t, controls) {
+  return `<div class="row" data-type="${t.type}" data-id="${t.tmdbId}">
+    ${t.poster ? `<img src="${IMG}/w92${t.poster}" alt="">` : '<div class="noposter"></div>'}
+    <div class="name"><b>${esc(t.title)}</b> <span class="meta">${t.year ?? ''} · ${t.type === 'tv' ? 'Show' : 'Movie'}</span></div>
+    <div class="ctl">${controls}</div>
+  </div>`;
+}
+
+async function loadMine() {
+  try {
+    const { ratings, watchlist } = await api('/api/titles');
+    $('#mine-ratings').innerHTML = ratings.length
+      ? ratings.slice().reverse().map((t) => row(t, `${ratingSelect(t.rating)}<button data-remove="ratings">Remove</button>`)).join('')
+      : '<p class="msg">Nothing rated here yet.</p>';
+    $('#mine-watchlist').innerHTML = watchlist.length
+      ? watchlist.slice().reverse().map((t) => row(t, `${ratingSelect(null)}<button data-remove="watchlist">Remove</button>`)).join('')
+      : '<p class="msg">Nothing added here yet.</p>';
+  } catch (e) { show('#search-msg', e.message, true); }
+}
+
+$('#search-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = $('#q').value.trim();
+  if (!q) return;
+  try {
+    const results = await api('/api/search?q=' + encodeURIComponent(q));
+    show('#search-msg', results.length ? '' : 'No matches.');
+    $('#results').innerHTML = results.map((t) => row(t, `${ratingSelect(null)}<button data-want>Want to watch</button>`)).join('');
+  } catch (err) { show('#search-msg', err.message, true); }
+});
+
+// One handler for every row: search results and both lists.
+async function onRow(e) {
+  const r = e.target.closest('.row');
+  if (!r) return;
+  const ref = { type: r.dataset.type, tmdbId: Number(r.dataset.id) };
+  try {
+    if (e.type === 'change' && e.target.matches('[data-rate]') && e.target.value) {
+      const t = await api('/api/titles', { method: 'POST', body: { ...ref, list: 'ratings', rating: Number(e.target.value) } });
+      show('#search-msg', `Rated ${t.title} ${t.rating}/10.`);
+    } else if (e.type === 'click' && e.target.matches('[data-want]')) {
+      const t = await api('/api/titles', { method: 'POST', body: { ...ref, list: 'watchlist' } });
+      show('#search-msg', `Added ${t.title} to your watchlist.`);
+    } else if (e.type === 'click' && e.target.matches('[data-remove]')) {
+      await api('/api/titles/remove', { method: 'POST', body: { ...ref, list: e.target.dataset.remove } });
+    } else return;
+    await Promise.all([loadMine(), refresh()]);
+  } catch (err) { show('#search-msg', err.message, true); }
+}
+$('#mine').addEventListener('change', onRow);
+$('#mine').addEventListener('click', onRow);
+
 await refresh();
 await loadProviders();
-if (!status.hasKey || !status.ratings) document.querySelector('[data-tab=setup]').click();
+if (!status.hasKey) document.querySelector('[data-tab=setup]').click();
+else if (!status.ratings) document.querySelector('[data-tab=mine]').click();

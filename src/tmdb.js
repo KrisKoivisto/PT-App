@@ -42,6 +42,20 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
       return hit ? { id: hit.id, type: kind } : null;
     },
 
+    async search(query) {
+      const r = await get('/search/multi', { query, include_adult: 'false' });
+      return (r?.results ?? [])
+        .filter((x) => x.media_type === 'movie' || x.media_type === 'tv')
+        .slice(0, 12)
+        .map((x) => ({
+          tmdbId: x.id,
+          type: x.media_type,
+          title: x.title ?? x.name,
+          year: Number((x.release_date ?? x.first_air_date ?? '').slice(0, 4)) || null,
+          poster: x.poster_path,
+        }));
+    },
+
     recommendations: (type, id) => get(`/${type}/${id}/recommendations`),
 
     // details + providers + imdb id in one request

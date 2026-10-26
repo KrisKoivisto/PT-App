@@ -62,11 +62,62 @@ export async function createApp({ dataDir = path.join(root, 'data'), key = proce
 
     'POST /api/import': async (req, url, body) => {
       const { kind, items } = parseImdbCsv(String(body.csv ?? ''));
-      // Re-importing replaces: IMDb exports are always the full list.
-      if (kind === 'ratings') profile.ratings = items;
-      else profile.watchlist = items;
+      // Re-importing replaces the last import (IMDb exports are always the full
+      // list) but keeps titles added by hand that the file doesn't cover.
+      const ids = new Set(items.map((i) => i.imdbId));
+      const keep = profile[kind].filter((i) => i.source === 'manual' && !ids.has(i.imdbId));
+      profile[kind] = [...items, ...keep];
       await profileFile.save();
       return { kind, count: items.length };
+    },
+
+    'GET /api/search': async (req, url) => {
+      const q = (url.searchParams.get('q') || '').trim();
+      return q ? needKey().search(q) : [];
+    },
+
+    'GET /api/titles': async () => ({
+      ratings: profile.ratings.filter((i) => i.source === 'manual'),
+      watchlist: profile.watchlist.filter((i) => i.source === 'manual'),
+    }),
+
+    'POST /api/titles': async (req, url, body) => {
+      const { list, type, tmdbId } = body;
+      const rating = Number(body.rating);
+      if (!['ratings', 'watchlist'].includes(list) || !['movie', 'tv'].includes(type) || !Number.isInteger(tmdbId)) {
+        throw Object.assign(new Error('Bad title.'), { status: 400 });
+      }
+      if (list === 'ratings' && !(Number.isInteger(rating) && rating >= 1 && rating <= 10)) {
+        throw Object.assign(new Error('Rating must be 1 to 10.'), { status: 400 });
+      }
+      const d = await needKey().details(type, tmdbId);
+      if (!d) throw Object.assign(new Error('TMDB has no such title.'), { status: 404 });
+      const item = {
+        imdbId: d.external_ids?.imdb_id || null,
+        tmdbId,
+        type,
+        title: d.title ?? d.name,
+        year: Number((d.release_date ?? d.first_air_date ?? '').slice(0, 4)) || null,
+        genres: (d.genres ?? []).map((g) => g.name),
+        poster: d.poster_path ?? null,
+        rating: list === 'ratings' ? rating : null,
+        source: 'manual',
+      };
+      // Replace an existing entry for the same title, imported or not.
+      const same = (i) => (i.tmdbId === tmdbId && i.type === type) || (item.imdbId && i.imdbId === item.imdbId);
+      profile[list] = [...profile[list].filter((i) => !same(i)), item];
+      // Rating something means you've watched it.
+      if (list === 'ratings') profile.watchlist = profile.watchlist.filter((i) => !same(i));
+      await Promise.all([profileFile.save(), cache.save()]);
+      return item;
+    },
+
+    'POST /api/titles/remove': async (req, url, body) => {
+      const { list, type, tmdbId } = body;
+      if (!['ratings', 'watchlist'].includes(list)) throw Object.assign(new Error('Bad list.'), { status: 400 });
+      profile[list] = profile[list].filter((i) => !(i.tmdbId === tmdbId && i.type === type));
+      await profileFile.save();
+      return { ok: true };
     },
 
     'GET /api/recommendations': async (req, url) => {

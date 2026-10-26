@@ -72,15 +72,29 @@ function matchServices(item, wanted, includeRentBuy) {
   return pool.filter((p) => wanted.has(p.id) && !seen.has(p.id) && seen.add(p.id));
 }
 
+// Titles added in the app already carry a TMDB id; IMDb imports need a lookup.
 async function resolve(tmdb, item) {
+  if (item.tmdbId) return { ...item, tmdbType: item.type };
   const hit = await tmdb.find(item.imdbId, item.type);
   return hit ? { ...item, tmdbId: hit.id, tmdbType: hit.type } : null;
 }
 
+function seenSet(items) {
+  const s = new Set();
+  for (const r of items) {
+    if (r.imdbId) s.add(r.imdbId);
+    if (r.tmdbId) s.add(`${r.type}:${r.tmdbId}`);
+  }
+  return s;
+}
+
+const isSeen = (seen, item) =>
+  (item.imdbId && seen.has(item.imdbId)) || (item.tmdbId && seen.has(`${item.type}:${item.tmdbId}`));
+
 export async function recommend(tmdb, profile, { type = 'all', genre = null, limit = 30 } = {}) {
   const wanted = new Set(profile.services);
   const rated = profile.ratings;
-  const seen = new Set(rated.map((r) => r.imdbId));
+  const seen = seenSet(rated);
   const affinity = genreAffinity(rated);
 
   const seeds = rated
@@ -122,7 +136,7 @@ export async function recommend(tmdb, profile, { type = 'all', genre = null, lim
   for (const row of detailed) {
     if (!row) continue;
     const { c, item } = row;
-    if (item.imdbId && seen.has(item.imdbId)) continue;
+    if (isSeen(seen, item)) continue;
     if (genre && !normGenres(item.genres).has(genre.toLowerCase())) continue;
 
     let services = [];
@@ -149,15 +163,15 @@ export async function recommend(tmdb, profile, { type = 'all', genre = null, lim
 // Watchlist titles that are streaming on the user's services right now.
 export async function availableWatchlist(tmdb, profile) {
   const wanted = new Set(profile.services);
-  const seen = new Set(profile.ratings.map((r) => r.imdbId));
-  const todo = profile.watchlist.filter((w) => !seen.has(w.imdbId));
+  const seen = seenSet(profile.ratings);
+  const todo = profile.watchlist.filter((w) => !isSeen(seen, w));
 
   const rows = await pool(todo, CONCURRENCY, async (w) => {
-    const hit = await tmdb.find(w.imdbId, w.type);
+    const hit = await resolve(tmdb, w);
     if (!hit) return null;
-    const d = await tmdb.details(hit.type, hit.id);
+    const d = await tmdb.details(hit.tmdbType, hit.tmdbId);
     if (!d) return null;
-    const item = shape(hit.type, d, profile.region, profile.includeRentBuy);
+    const item = shape(hit.tmdbType, d, profile.region, profile.includeRentBuy);
     const services = wanted.size ? matchServices(item, wanted, profile.includeRentBuy) : [];
     const anywhere = item.stream.length + item.free.length > 0;
     return { ...item, services, available: wanted.size ? services.length > 0 : anywhere };

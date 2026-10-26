@@ -12,6 +12,7 @@
   <nav>
     <button data-tab="foryou" class="on">For you</button>
     <button data-tab="watchlist">Watchlist</button>
+    <button data-tab="mine">My titles</button>
     <button data-tab="setup">Setup</button>
   </nav>
 </header>
@@ -37,10 +38,24 @@
     <div id="watchlist-grid" class="grid"></div>
   </section>
 
+  <section id="mine" hidden>
+    <form id="search-form" class="filters">
+      <input id="q" placeholder="Search a movie or show you've seen or want to see" autocomplete="off">
+      <button id="search-btn">Search</button>
+    </form>
+    <p id="search-msg" class="msg">Rate what you've watched (1 to 10). Anything you rate 8 or higher drives your recommendations.</p>
+    <div id="results" class="rows"></div>
+
+    <h2>Rated here</h2>
+    <div id="mine-ratings" class="rows"></div>
+    <h2>Want to watch</h2>
+    <div id="mine-watchlist" class="rows"></div>
+  </section>
+
   <section id="setup" hidden>
     <div class="card">
-      <h2>1. Import from IMDb</h2>
-      <p>IMDb has no personal API, so this uses their CSV export. On IMDb, open <b>Your Ratings</b>, click the three dots, and choose <b>Export</b>. Do the same on your <b>Watchlist</b>. Importing again replaces the old data.</p>
+      <h2>1. Import from IMDb (optional)</h2>
+      <p>You can skip this and add titles on the My titles tab instead. If you do have IMDb history, this uses their CSV export. On IMDb, open <b>Your Ratings</b>, click the three dots, and choose <b>Export</b>. Do the same on your <b>Watchlist</b>. Importing again replaces the old data.</p>
       <label class="file">Ratings CSV <input type="file" accept=".csv" data-import></label>
       <label class="file">Watchlist CSV <input type="file" accept=".csv" data-import></label>
       <p id="import-msg" class="msg"></p>
