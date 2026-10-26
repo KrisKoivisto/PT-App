@@ -19,10 +19,42 @@ function poster(title, hue) {
   }
   const text = lines.slice(0, 5).map((l, i) => `<text x="12" y="${150 + i * 20 - lines.length * 10}" font-family="Georgia,serif" font-size="17" font-weight="700" fill="#fff">${esc(l)}</text>`).join('');
   return svg(
-    `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${hue} 45% 32%)"/><stop offset="1" stop-color="hsl(${hue} 50% 12%)"/></linearGradient></defs><rect width="185" height="278" fill="url(#g)"/>${text}<text x="12" y="262" font-family="Arial,sans-serif" font-size="10" letter-spacing="1.5" fill="#ffffffaa">SAMPLE</text>`,
+    `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${hue} 45% 32%)"/><stop offset="1" stop-color="hsl(${hue} 50% 12%)"/></linearGradient></defs><rect width="185" height="278" fill="url(#g)"/>${text}<text x="12" y="22" font-family="Arial,sans-serif" font-size="10" letter-spacing="1.5" fill="#ffffffaa">SAMPLE</text>`,
     185, 278,
   );
 }
+
+function backdrop(hue) {
+  return svg(
+    `<defs><linearGradient id="b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue} 40% 26%)"/><stop offset="1" stop-color="hsl(${(hue + 40) % 360} 45% 8%)"/></linearGradient></defs><rect width="780" height="439" fill="url(#b)"/>`
+    + Array.from({ length: 9 }, (_, i) => `<circle cx="${80 + i * 85}" cy="${120 + (i % 3) * 60}" r="${30 + (i % 4) * 14}" fill="#fff" opacity=".05"/>`).join(''),
+    780, 439,
+  );
+}
+
+function headshot(name, hue) {
+  const initials = name.split(' ').map((w) => w[0]).join('');
+  return svg(
+    `<rect width="120" height="120" fill="hsl(${hue} 30% 38%)"/><circle cx="60" cy="48" r="22" fill="hsl(${hue} 25% 70%)"/><path d="M18 120c4-28 22-42 42-42s38 14 42 42z" fill="hsl(${hue} 25% 70%)"/><text x="60" y="114" font-family="Arial,sans-serif" font-weight="700" font-size="14" fill="#fff" text-anchor="middle">${initials}</text>`,
+    120, 120,
+  );
+}
+
+// Made-up people for the sample cast.
+const PEOPLE = [
+  { id: 901, name: 'Dana Whitlock', dept: 'Directing' },
+  { id: 902, name: 'Marcus Bell', dept: 'Acting' },
+  { id: 903, name: 'Ines Okafor', dept: 'Acting' },
+  { id: 904, name: 'Ray Castellano', dept: 'Acting' },
+  { id: 905, name: 'June Park', dept: 'Acting' },
+  { id: 906, name: 'Theo Grant', dept: 'Acting' },
+  { id: 907, name: 'Lena Sorensen', dept: 'Acting' },
+  { id: 908, name: 'Caleb Moss', dept: 'Acting' },
+  { id: 909, name: 'Priya Raman', dept: 'Acting' },
+  { id: 910, name: 'Walt Hughes', dept: 'Acting' },
+];
+PEOPLE.forEach((p, i) => { p.profile = headshot(p.name, (i * 71) % 360); });
+const person = new Map(PEOPLE.map((p) => [p.id, p]));
 
 const P = {
   netflix: { provider_id: 8, provider_name: 'Netflix', logo_path: logo('#d81f26', 'N') },
@@ -66,7 +98,12 @@ const TITLES = [
   { id: 115, type: 'tv', title: 'Small Town Secrets', year: 2022, genres: [G.drama, G.mystery], kw: [], on: ['hulu', 'max'], pop: 60, vote: 7.2, seasons: 2, overview: 'A reporter comes home to cover a fire and finds the whole town agreeing on a story that doesn\'t add up.' },
   { id: 116, type: 'movie', title: 'The Last Laugh Tour', year: 2024, genres: [G.comedy], kw: [9716], on: ['netflix'], pop: 38, vote: 7.7, runtime: 64, overview: 'A stand-up special recorded on the final night of a forty-city tour.' },
 ];
-TITLES.forEach((t, i) => { t.poster = poster(t.title, (i * 47) % 360); });
+const CAST = {"101": [[901, "Narrator"], [904, "Self"], [908, "Self"]], "102": [[905, "Self"], [902, "Self"], [901, "Narrator"]], "103": [[902, "Victor Lane"], [907, "Agnes Lane"], [910, "Det. Harlan"], [906, "Mayor Pruitt"]], "104": [[909, "Self"], [910, "Self"]], "105": [[903, "Narrator"], [905, "Self"], [909, "Self"]], "106": [[907, "Self"], [901, "Narrator"]], "107": [[903, "Host"], [910, "Self"]], "108": [[906, "Self"], [909, "Self"], [901, "Narrator"]], "109": [[908, "Danny Ruiz"], [904, "Frank Ruiz"], [905, "Mona"], [902, "Agent Cole"]], "110": [[904, "Self"], [908, "Self"]], "111": [[906, "Self"], [903, "Narrator"]], "112": [[901, "Host"], [904, "Self"], [907, "Self"]], "113": [[905, "Narrator"], [907, "Self"]], "114": [[902, "Hal Benton"], [909, "Rosa"], [906, "The Dog (voice)"]], "115": [[907, "Claire Dunn"], [908, "Sheriff Webb"], [903, "Ruth Dunn"], [910, "Pastor Lyle"]], "116": [[906, "Self"]]};
+TITLES.forEach((t, i) => {
+  t.poster = poster(t.title, (i * 47) % 360);
+  t.backdrop = backdrop((i * 47) % 360);
+  t.cast = CAST[t.id] ?? [];
+});
 
 const byId = new Map(TITLES.map((t) => [`${t.type}:${t.id}`, t]));
 const STOP = new Set(['the', 'and', 'who', 'with', 'about', 'that']);
@@ -84,6 +121,7 @@ function details(t) {
     ...brief(t),
     overview: t.overview,
     poster_path: t.poster,
+    backdrop_path: t.backdrop,
     genres: t.genres.map((id) => ({ id, name: GENRE_NAMES[id] })),
     runtime: t.runtime ?? null,
     number_of_seasons: t.seasons ?? null,
@@ -115,10 +153,19 @@ function discover(type, q) {
   return { page: 1, total_pages: 1, results: list.map(brief) };
 }
 
+function filmography(p) {
+  return TITLES.filter((t) => t.cast.some(([id]) => id === p.id))
+    .map((t) => ({ ...brief(t), character: t.cast.find(([id]) => id === p.id)[1], genre_ids: t.genres }));
+}
+
 function search(query) {
   const words = query.toLowerCase().split(/\s+/).filter((w) => w.length >= 3 && !STOP.has(w));
   const hits = TITLES.filter((t) => words.some((w) => t.title.toLowerCase().includes(w)));
-  return { results: hits.sort((a, b) => b.pop - a.pop).map(brief) };
+  const people = PEOPLE.filter((p) => words.some((w) => p.name.toLowerCase().includes(w))).map((p) => ({
+    id: p.id, media_type: 'person', name: p.name, profile_path: p.profile, known_for_department: p.dept,
+    known_for: filmography(p).slice(0, 3),
+  }));
+  return { results: [...hits.sort((a, b) => b.pop - a.pop).map(brief), ...people] };
 }
 
 function recommendations(t) {
@@ -148,10 +195,26 @@ function route(url) {
     return { results: Object.entries(KEYWORDS).filter(([, n]) => n.includes(term)).map(([id, name]) => ({ id: Number(id), name })) };
   }
   if (path.startsWith('/find/')) return { movie_results: [], tv_results: [] };
-  const m = path.match(/^\/(movie|tv)\/(\d+)(\/recommendations)?$/);
+  const pm = path.match(/^\/person\/(\d+)$/);
+  if (pm) {
+    const p = person.get(Number(pm[1]));
+    return p && { id: p.id, name: p.name, profile_path: p.profile, known_for_department: p.dept, combined_credits: { cast: filmography(p) } };
+  }
+  const m = path.match(/^\/(movie|tv)\/(\d+)(\/recommendations|\/credits|\/aggregate_credits)?$/);
   const t = m && byId.get(`${m[1]}:${m[2]}`);
-  if (t) return m[3] ? recommendations(t) : details(t);
-  return null;
+  if (!t) return null;
+  if (m[3] === '/recommendations') return recommendations(t);
+  if (m[3]) {
+    return {
+      cast: t.cast.map(([id, character]) => {
+        const p = person.get(id);
+        return m[3] === '/aggregate_credits'
+          ? { id, name: p.name, profile_path: p.profile, roles: [{ character }] }
+          : { id, name: p.name, profile_path: p.profile, character };
+      }),
+    };
+  }
+  return details(t);
 }
 
 export async function demoFetch(url) {

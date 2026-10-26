@@ -53,6 +53,7 @@ export function shape(type, d, region) {
     year: Number((d.release_date ?? d.first_air_date ?? '').slice(0, 4)) || null,
     overview: d.overview,
     poster: d.poster_path,
+    backdrop: d.backdrop_path ?? null,
     genres: (d.genres ?? []).map((g) => g.name),
     runtime: d.runtime ?? d.episode_run_time?.[0] ?? null,
     seasons: d.number_of_seasons ?? null,

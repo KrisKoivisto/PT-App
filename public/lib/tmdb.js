@@ -5,7 +5,9 @@ const TTL = 3 * 24 * 60 * 60 * 1000;
 export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, fetchImpl = fetch }) {
   const isToken = key && key.length > 40;
 
-  async function get(pathname, params = {}) {
+  // `shrink` trims a big response before it's cached, so cast lists and
+  // filmographies don't eat the phone's storage.
+  async function get(pathname, params = {}, shrink = (v) => v) {
     const url = new URL(base + pathname);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
     if (!isToken) url.searchParams.set('api_key', key);
@@ -26,7 +28,7 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
       if (res.status === 404) return null;
       if (res.status === 401) throw new Error('TMDB rejected the API key.');
       if (!res.ok) throw new Error(`TMDB ${res.status} on ${pathname}`);
-      const v = await res.json();
+      const v = shrink(await res.json());
       if (cache) cache.data[cacheKey] = { t: Date.now(), v };
       return v;
     }
@@ -43,9 +45,12 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
     },
 
     // Titles first, then the best-known work of any people that match
-    // (search "Ted Bundy" or an actor and you get what they're in).
+    // (search "Ted Bundy" or an actor and you get what they're in). People
+    // come back separately too, so they can be shown with their photos.
     async search(query) {
       const r = await get('/search/multi', { query, include_adult: 'false' });
+      const people = (r?.results ?? []).filter((x) => x.media_type === 'person')
+        .map((x) => ({ id: x.id, name: x.name, profile: x.profile_path ?? null, dept: x.known_for_department ?? null }));
       const out = [];
       const seen = new Set();
       const add = (x) => {
@@ -58,7 +63,37 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
       const results = r?.results ?? [];
       results.forEach(add);
       for (const p of results.filter((x) => x.media_type === 'person')) (p.known_for ?? []).forEach(add);
-      return out.slice(0, 16);
+      return { titles: out.slice(0, 16), people: people.slice(0, 8) };
+    },
+
+    // Top-billed cast with photos. TV uses aggregate credits so long-running
+    // shows list their regulars, not just the latest season.
+    credits(type, id) {
+      const path = type === 'tv' ? `/tv/${id}/aggregate_credits` : `/movie/${id}/credits`;
+      return get(path, {}, (r) => ({
+        cast: (r?.cast ?? []).slice(0, 16).map((c) => ({
+          id: c.id,
+          name: c.name,
+          character: c.character ?? c.roles?.[0]?.character ?? '',
+          profile: c.profile_path ?? null,
+        })),
+      }));
+    },
+
+    // A person and what they're in, most popular first. Talk shows and news
+    // are dropped: an actor's guest spots there aren't what you're after.
+    person(id) {
+      return get(`/person/${id}`, { append_to_response: 'combined_credits' }, (r) => {
+        const seen = new Set();
+        const credits = (r?.combined_credits?.cast ?? [])
+          .filter((c) => (c.media_type === 'movie' || c.media_type === 'tv')
+            && !(c.genre_ids ?? []).some((g) => g === 10767 || g === 10763))
+          .sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0))
+          .filter((c) => { const k = `${c.media_type}:${c.id}`; return !seen.has(k) && seen.add(k); })
+          .slice(0, 30)
+          .map((c) => ({ type: c.media_type, id: c.id, character: c.character ?? '' }));
+        return r && { id: r.id, name: r.name, profile: r.profile_path ?? null, dept: r.known_for_department ?? null, credits };
+      });
     },
 
     async keywords(query) {

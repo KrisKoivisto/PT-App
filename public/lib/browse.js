@@ -85,7 +85,7 @@ const SORTS = {
 };
 
 // Turn bare TMDB ids into full items with where-to-watch.
-async function detail(tmdb, profile, list) {
+export async function detail(tmdb, profile, list) {
   const rows = await pool(list, CONCURRENCY, async ({ type, id }) => {
     const d = await tmdb.details(type, id);
     if (!d) return null;
@@ -177,8 +177,8 @@ async function topicKeywords(tmdb, q) {
 
 export async function search(tmdb, profile, q) {
   const suggestions = matchCategories(q);
-  const hits = await tmdb.search(q);
-  const items = await detail(tmdb, profile, hits.map((h) => ({ type: h.type, id: h.tmdbId })));
+  const { titles, people } = await tmdb.search(q);
+  const items = await detail(tmdb, profile, titles.map((h) => ({ type: h.type, id: h.tmdbId })));
 
   // Plot-ish searches ("nurse who killed patients") rarely match a title, so
   // also try them as topics. Skip when the query is clearly a title.
@@ -198,5 +198,5 @@ export async function search(tmdb, profile, q) {
       if (list.length) topic = { label: kws.map((k) => k.name).join(' + '), items: await detail(tmdb, profile, list) };
     }
   }
-  return { suggestions, items, topic };
+  return { suggestions, people, items, topic };
 }

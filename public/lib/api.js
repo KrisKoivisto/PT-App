@@ -1,7 +1,7 @@
 import { parseImdbCsv } from './imdb.js';
 import { createTmdb, pool } from './tmdb.js';
 import { recommend, availableWatchlist, genreAffinity, shape, matchServices } from './recommend.js';
-import { browse, search, CATEGORIES, TRUE_CRIME_SUBS } from './browse.js';
+import { browse, search, detail, CATEGORIES, TRUE_CRIME_SUBS } from './browse.js';
 import { REACTIONS, reactionOf, annotate } from './mine.js';
 
 export const defaultProfile = () => ({
@@ -97,12 +97,36 @@ export function createApi({ store, base, fetchImpl }) {
 
     async search(q) {
       q = String(q ?? '').trim();
-      if (!q) return { suggestions: [], items: [], topic: null };
+      if (!q) return { suggestions: [], people: [], items: [], topic: null };
       const r = await search(needKey(), profile, q);
       return done({
         ...r,
         items: annotate(profile, r.items),
         topic: r.topic && { ...r.topic, items: annotate(profile, r.topic.items) },
+      });
+    },
+
+    // Everything for the detail screen: the title, where to watch, and cast.
+    async title(type, tmdbId) {
+      const t = needKey();
+      const [items, credits] = await Promise.all([
+        detail(t, profile, [{ type, id: tmdbId }]),
+        t.credits(type, tmdbId),
+      ]);
+      if (!items.length) throw fail('TMDB has no such title.', 404);
+      return done({ ...annotate(profile, items)[0], cast: credits?.cast ?? [] });
+    },
+
+    // An actor (or director) and the titles they're known for.
+    async person(id) {
+      const t = needKey();
+      const p = await t.person(id);
+      if (!p) throw fail('TMDB has no such person.', 404);
+      const items = await detail(t, profile, p.credits);
+      const roles = new Map(p.credits.map((c) => [`${c.type}:${c.id}`, c.character]));
+      return done({
+        id: p.id, name: p.name, profile: p.profile, dept: p.dept,
+        items: annotate(profile, items).map((i) => ({ ...i, role: roles.get(`${i.type}:${i.tmdbId}`) || '' })),
       });
     },
 
