@@ -1,12 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtemp } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import { parseCsv } from '../src/csv.js';
-import { parseImdbCsv } from '../src/imdb.js';
-import { createApp } from '../server.js';
+import { parseCsv } from '../public/lib/csv.js';
+import { parseImdbCsv } from '../public/lib/imdb.js';
+import { createApi, browserStore } from '../public/lib/api.js';
+import { matchCategories } from '../public/lib/browse.js';
+import { createServer } from '../server.js';
 
 const RATINGS = `Const,Your Rating,Date Rated,Title,Original Title,URL,Title Type,IMDb Rating,Runtime (mins),Year,Genres,Num Votes,Release Date,Directors
 tt0000001,10,2024-01-01,"Seed, The Movie",,https://x,movie,8.0,100,2000,"Drama, Sci-Fi",1000,2000-01-01,A
@@ -56,44 +55,80 @@ const DB = {
   '/tv/30': detail(30, 'Show Rec', 'tt0000030', [NETFLIX], { number_of_seasons: 3, runtime: undefined }),
   '/movie/10': detail(10, 'On Netflix', 'tt0000010', [NETFLIX]),
   '/movie/11': detail(11, 'Nowhere', 'tt0000011', []),
-  '/search/multi': { results: [
+  '/configuration': (u) => (u.searchParams.get('api_key') === 'bad' ? 401 : { images: {} }),
+  '/search/keyword': (u) => ({ results: {
+    nurse: [{ id: 500, name: 'nurse' }, { id: 502, name: 'nursery' }],
+    killed: [{ id: 9, name: 'killer' }],
+    patients: [{ id: 501, name: 'patient' }],
+  }[u.searchParams.get('query')] ?? [] }),
+  '/search/multi': (u) => (u.searchParams.get('query') === 'some actor' ? { results: [
+    { id: 99, media_type: 'person', name: 'Some Actor', known_for: [{ id: 21, media_type: 'movie' }, { id: 30, media_type: 'tv' }] },
+  ] } : { results: [
     { id: 40, media_type: 'movie', title: 'Hand Picked', release_date: '2019-02-02', poster_path: '/p.jpg' },
     { id: 99, media_type: 'person', name: 'Some Actor' },
     { id: 41, media_type: 'tv', name: 'Hand Show', first_air_date: '2018-01-01' },
-  ] },
+  ] }),
   '/movie/40': detail(40, 'Hand Picked', 'tt0000040', [], { genres: [{ name: 'Science Fiction' }] }),
   '/movie/40/recommendations': { results: [{ id: 21 }, { id: 40 }] },
   '/tv/41': detail(41, 'Hand Show', null, [NETFLIX]),
   '/genre/movie/list': { genres: [{ id: 80, name: 'Crime' }, { id: 53, name: 'Thriller' }, { id: 9648, name: 'Mystery' }] },
   '/genre/tv/list': { genres: [{ id: 80, name: 'Crime' }, { id: 9648, name: 'Mystery' }] },
-  '/discover/movie': { total_pages: 3, results: [{ id: 21, popularity: 50 }, { id: 1, popularity: 10 }] },
-  '/discover/tv': { total_pages: 1, results: [{ id: 30, popularity: 80 }] },
+  '/discover/movie': (u) => (u.searchParams.get('with_keywords') === '500,501'
+    ? { total_pages: 1, results: [{ id: 21, popularity: 5 }] }
+    : { total_pages: 3, results: [{ id: 21, popularity: 50 }, { id: 1, popularity: 10 }] }),
+  '/discover/tv': (u) => (u.searchParams.get('with_keywords') === '500,501'
+    ? { total_pages: 0, results: [] }
+    : { total_pages: 1, results: [{ id: 30, popularity: 80 }] }),
   '/watch/providers/movie': { results: [{ provider_id: 8, provider_name: 'Netflix', logo_path: '/n.jpg', display_priorities: { US: 1 } }] },
   '/watch/providers/tv': { results: [{ provider_id: 15, provider_name: 'Hulu', logo_path: '/h.jpg', display_priorities: { US: 2 } }] },
 };
 
 const calls = [];
+const memStore = (key) => {
+  const saved = { key, profile: null };
+  return { saved, cache: { data: {} }, loadProfile: () => saved.profile, saveProfile: (p) => { saved.profile = structuredClone(p); }, loadKey: () => saved.key, saveKey: (k) => { saved.key = k; } };
+};
+
+// Mock TMDB, plus a call(method, path, body) adapter so tests read like the
+// old HTTP routes even though the app now runs in the browser.
 async function setup(key = 'k') {
   const mock = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
     calls.push(u);
-    const hit = DB[u.pathname];
-    res.writeHead(hit ? 200 : 404, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(hit ?? { status_code: 34 }));
+    let hit = DB[u.pathname];
+    if (typeof hit === 'function') hit = hit(u);
+    const code = typeof hit === 'number' ? hit : hit ? 200 : 404;
+    res.writeHead(code, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(code === 200 ? hit : { status_code: 34 }));
   });
   await new Promise((r) => mock.listen(0, r));
-  const { server } = await createApp({
-    dataDir: await mkdtemp(path.join(os.tmpdir(), 'ptapp-')),
-    key,
-    tmdbBase: `http://127.0.0.1:${mock.address().port}`,
-  });
-  await new Promise((r) => server.listen(0, r));
-  const base = `http://127.0.0.1:${server.address().port}`;
-  const call = async (method, p, body) => {
-    const res = await fetch(base + p, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body && JSON.stringify(body) });
-    return { status: res.status, body: await res.json() };
+  const store = memStore(key);
+  const api = createApi({ store, base: `http://127.0.0.1:${mock.address().port}` });
+  const routes = {
+    'GET /api/status': () => api.status(),
+    'GET /api/providers': (q) => api.providers(q.get('region') ?? undefined),
+    'POST /api/settings': (q, b) => api.settings(b),
+    'POST /api/import': (q, b) => api.importCsv(b.csv),
+    'GET /api/categories': () => api.categories(),
+    'GET /api/browse': (q) => api.browse({
+      ...Object.fromEntries(q), onlyMine: q.get('onlyMine') === '1', hideRated: q.get('hideRated') !== '0',
+    }),
+    'GET /api/search': (q) => api.search(q.get('q')),
+    'GET /api/titles': (q) => api.titles(q.get('show') ?? undefined),
+    'POST /api/titles': (q, b) => api.mark(b),
+    'POST /api/titles/remove': (q, b) => api.unmark(b),
+    'GET /api/recommendations': (q) => api.recommendations({ type: q.get('type') ?? 'all' }),
+    'GET /api/watchlist': () => api.watchlist(),
   };
-  return { call, close: () => { server.close(); mock.close(); } };
+  const call = async (method, p, body) => {
+    const u = new URL(p, 'http://x');
+    try {
+      return { status: 200, body: await routes[`${method} ${u.pathname}`](u.searchParams, body) };
+    } catch (e) {
+      return { status: e.status ?? 500, body: { error: e.message } };
+    }
+  };
+  return { call, api, store, close: () => mock.close() };
 }
 
 test('end to end: import, pick service, recommend, watchlist', async () => {
@@ -134,7 +169,7 @@ test('rejects bad input and missing key', async () => {
   const { call, close } = await setup(null);
   try {
     assert.equal((await call('POST', '/api/import', { csv: 'nope' })).status, 500);
-    assert.match((await call('GET', '/api/recommendations')).body.error, /TMDB_API_KEY/);
+    assert.match((await call('GET', '/api/recommendations')).body.error, /TMDB key/);
   } finally { close(); }
 });
 
@@ -194,7 +229,8 @@ test('browse: categories map to genres or keywords, mix movies and shows, hide r
   const { call, close } = await setup();
   try {
     const cats = (await call('GET', '/api/categories')).body;
-    assert.equal(cats[0].name, 'True crime');
+    assert.equal(cats.categories[0].name, 'True crime');
+    assert.ok(cats.trueCrime.some((c) => c.name === 'Heists & robberies'));
 
     calls.length = 0;
     let r = (await call('GET', '/api/browse?category=true-crime')).body;
@@ -252,4 +288,97 @@ test('dislikes push similar titles down', async () => {
     assert.ok(recs[0].score < before);
     assert.deepEqual(recs[0].because, ['Hand Picked']);
   } finally { close(); }
+});
+
+test('true crime subcategory: true crime AND each topic, plus documentaries', async () => {
+  const { call, close } = await setup();
+  try {
+    calls.length = 0;
+    const r = (await call('GET', '/api/browse?category=true-crime&sub=heist&type=movie')).body;
+    assert.equal(r.sub, 'Heists & robberies');
+    const disc = calls.filter((u) => u.pathname === '/discover/movie').map((u) => [u.searchParams.get('with_keywords'), u.searchParams.get('with_genres')]);
+    assert.equal(disc.length, 9, 'two anchored calls per keyword plus one documentary call');
+    assert.deepEqual(disc.find(([k]) => k === '33722,10051'), ['33722,10051', null]);
+    assert.deepEqual(disc.find(([k]) => k === '9672,10051'), ['9672,10051', '80']);
+    assert.deepEqual(disc.find(([, g]) => g === '99'), ['10051|191845|15363|642', '99']);
+    // Same title from several calls shows up once
+    assert.deepEqual(r.items.map((i) => i.tmdbId), [21, 1]);
+
+    assert.equal((await call('GET', '/api/browse?category=true-crime&sub=nope')).status, 400);
+  } finally { close(); }
+});
+
+test('search: people bring their titles, plot words become topics, categories get suggested', async () => {
+  const { call, close } = await setup();
+  try {
+    let r = (await call('GET', '/api/search?q=some actor')).body;
+    assert.deepEqual(r.items.map((i) => i.title), ['On Hulu Only', 'Show Rec']);
+
+    calls.length = 0;
+    r = (await call('GET', '/api/search?q=nurse who killed patients')).body;
+    // "killer" isn't "killed" and "nursery" isn't "nurse": only exact tags count
+    assert.equal(r.topic.label, 'nurse + patient');
+    assert.deepEqual(r.topic.items.map((i) => i.title), ['On Hulu Only']);
+    assert.equal(calls.find((u) => u.pathname === '/discover/movie').searchParams.get('with_keywords'), '500,501');
+
+    assert.deepEqual(matchCategories('that bank heist doc').map((s) => s.label), ['Documentary', 'True crime › Heists & robberies']);
+    assert.deepEqual(matchCategories("lover's quarrel").map((s) => s.label), ['True crime › Love gone wrong']);
+    assert.deepEqual(matchCategories('con man').map((s) => s.label), ['True crime › Con artists & scams']);
+    assert.deepEqual(matchCategories('the staircase'), []);
+  } finally { close(); }
+});
+
+test('key check, backup and restore', async () => {
+  const { api, store, close } = await setup(null);
+  try {
+    assert.equal(api.hasKey(), false);
+    await assert.rejects(api.setKey('bad'), /rejected/);
+    assert.equal(store.saved.key, null);
+    await api.setKey('  good  ');
+    assert.equal(store.saved.key, 'good');
+    await api.mark({ list: 'ratings', type: 'movie', tmdbId: 40, reaction: 'love', reasons: ['Story'] });
+
+    const backup = api.exportData();
+    assert.ok(!backup.includes('good'), 'the key stays out of backups');
+    api.reset();
+    assert.equal(api.status().ratings, 0);
+    assert.deepEqual(api.importData(backup), { ratings: 1, watchlist: 0 });
+    assert.equal(store.saved.profile.ratings[0].reasons[0], 'Story');
+    assert.throws(() => api.importData('{"hello":1}'), /backup/);
+  } finally { close(); }
+});
+
+test('browser store: profile wins over cache when storage is full', () => {
+  const data = new Map();
+  const ls = {
+    getItem: (k) => data.get(k) ?? null,
+    setItem: (k, v) => {
+      const used = [...data].reduce((n, [key, val]) => n + (key === k ? 0 : val.length), 0);
+      if (used + v.length > 1000) throw new Error('QuotaExceededError');
+      data.set(k, v);
+    },
+    removeItem: (k) => data.delete(k),
+  };
+  ls.setItem('wtw.cache', JSON.stringify({ x: { t: 1, v: 'y'.repeat(900) } }));
+  const store = browserStore(ls);
+  store.saveProfile({ ratings: ['z'.repeat(300)] });
+  assert.ok(data.get('wtw.profile'));
+  assert.equal(data.get('wtw.cache'), undefined);
+  assert.throws(() => store.saveProfile({ ratings: ['z'.repeat(2000)] }), /storage/);
+});
+
+test('static server serves the app and nothing outside it', async () => {
+  const server = createServer();
+  await new Promise((r) => server.listen(0, r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    let res = await fetch(base + '/');
+    assert.match(await res.text(), /What to Watch/);
+    res = await fetch(base + '/lib/api.js');
+    assert.equal(res.headers.get('content-type'), 'text/javascript');
+    res = await fetch(base + '/manifest.webmanifest');
+    assert.equal((await res.json()).display, 'standalone');
+    res = await fetch(base + '/%2e%2e/package.json');
+    assert.ok([403, 404].includes(res.status));
+  } finally { server.close(); }
 });

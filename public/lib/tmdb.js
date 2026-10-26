@@ -42,19 +42,32 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
       return hit ? { id: hit.id, type: kind } : null;
     },
 
+    // Titles first, then the best-known work of any people that match
+    // (search "Ted Bundy" or an actor and you get what they're in).
     async search(query) {
       const r = await get('/search/multi', { query, include_adult: 'false' });
-      return (r?.results ?? [])
-        .filter((x) => x.media_type === 'movie' || x.media_type === 'tv')
-        .slice(0, 12)
-        .map((x) => ({
-          tmdbId: x.id,
-          type: x.media_type,
-          title: x.title ?? x.name,
-          year: Number((x.release_date ?? x.first_air_date ?? '').slice(0, 4)) || null,
-          poster: x.poster_path,
-        }));
+      const out = [];
+      const seen = new Set();
+      const add = (x) => {
+        const k = `${x.media_type}:${x.id}`;
+        if ((x.media_type === 'movie' || x.media_type === 'tv') && !seen.has(k)) {
+          seen.add(k);
+          out.push({ tmdbId: x.id, type: x.media_type });
+        }
+      };
+      const results = r?.results ?? [];
+      results.forEach(add);
+      for (const p of results.filter((x) => x.media_type === 'person')) (p.known_for ?? []).forEach(add);
+      return out.slice(0, 16);
     },
+
+    async keywords(query) {
+      const r = await get('/search/keyword', { query });
+      return r?.results ?? [];
+    },
+
+    // Cheap call that fails with 401 on a bad key.
+    verify: () => get('/configuration'),
 
     discover: (type, params) => get(`/discover/${type}`, { include_adult: 'false', ...params }),
 

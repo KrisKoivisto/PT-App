@@ -11,21 +11,44 @@
   }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+[hidden] { display: none !important; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, sans-serif;
+  -webkit-text-size-adjust: 100%; padding-bottom: calc(68px + env(safe-area-inset-bottom));
+}
 header, main, footer { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 20px; padding-bottom: 12px; }
+header { padding-top: calc(14px + env(safe-area-inset-top)); padding-bottom: 4px; }
 h1 { margin: 0; font-size: 1.4rem; }
 h2 { margin-top: 0; font-size: 1.1rem; }
-nav { display: flex; gap: 4px; flex-wrap: wrap; }
-button, select, input:not([type]), input[type=text] {
+/* Tab bar along the bottom, like a phone app; centered on wide screens. */
+nav {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; display: flex; justify-content: center;
+  background: var(--card); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom);
+}
+nav button {
+  flex: 1; max-width: 140px; border: 0; border-radius: 0; background: none; padding: 8px 2px 10px;
+  font-size: .72rem; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+nav .ico { font-size: 1.25rem; line-height: 1; }
+nav button.on { color: var(--accent); font-weight: 600; }
+button, select, input:not([type]), input[type=text], input[type=search], input[type=password] {
   font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg);
 }
 button { cursor: pointer; }
-nav button.on, .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.searchbar { display: flex; gap: 8px; margin: 10px 0 4px; }
+.searchbar input { flex: 1; min-width: 0; font-size: 1.05rem; padding: 10px 12px; }
+.searchbar button { padding: 10px 16px; }
+.hint { margin: 0 0 8px; font-size: .8rem; color: var(--muted); }
+.suggest { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
+.suggest button { border-color: var(--accent); color: var(--accent); border-radius: 999px; font-size: .9rem; }
+.steps { padding-left: 20px; }
+.steps li { margin-bottom: 4px; }
+.msg.ok { color: var(--like); }
+a { color: var(--accent); }
 .danger { color: var(--err); }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
 .filters.small { font-size: .9rem; }
-#q { flex: 1; min-width: 200px; }
 .check { display: inline-flex; gap: 6px; align-items: center; }
 .msg { color: var(--muted); min-height: 1.5em; }
 .msg.err { color: var(--err); }
@@ -33,6 +56,15 @@ nav button.on, .primary { background: var(--accent); border-color: var(--accent)
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .chips button { border-radius: 999px; font-size: .9rem; padding: 4px 12px; }
 .chips button.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.chips.sub { padding: 8px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); }
+.chips.sub button { font-size: .82rem; }
+.chips.sub button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+@media (max-width: 600px) {
+  /* One swipeable row of categories instead of a tall wall of chips */
+  #cats { flex-wrap: nowrap; overflow-x: auto; margin-right: -16px; padding-right: 16px; scrollbar-width: none; }
+  #cats::-webkit-scrollbar { display: none; }
+  #cats button { flex: none; }
+}
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
 .item { display: flex; flex-direction: column; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
@@ -72,6 +104,8 @@ nav button.on, .primary { background: var(--accent); border-color: var(--accent)
 .providers { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin-top: 8px; }
 .prov { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; font-size: .85rem; cursor: pointer; }
 .prov img { width: 24px; height: 24px; border-radius: 4px; }
+main h2 { margin: 20px 0 8px; font-size: 1rem; }
+main .card h2 { margin-top: 0; font-size: 1.1rem; }
 footer { color: var(--muted); font-size: .75rem; padding-top: 24px; padding-bottom: 32px; }
 
 @media (max-width: 400px) {

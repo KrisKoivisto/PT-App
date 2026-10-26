@@ -2,51 +2,78 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>What to Watch</title>
+<meta name="description" content="Find where a movie or show is streaming, and keep your own watched list.">
+<meta name="theme-color" content="#b4442a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="What to Watch">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
   <h1>What to Watch</h1>
-  <nav>
-    <button data-tab="browse" class="on">Browse</button>
-    <button data-tab="foryou">For you</button>
-    <button data-tab="watchlist">Watchlist</button>
-    <button data-tab="mine">My titles</button>
-    <button data-tab="setup">Setup</button>
-  </nav>
 </header>
+
+<nav>
+  <button data-tab="browse" class="on"><span class="ico">⌕</span>Search</button>
+  <button data-tab="foryou"><span class="ico">★</span>For you</button>
+  <button data-tab="watchlist"><span class="ico">＋</span>Watchlist</button>
+  <button data-tab="mine"><span class="ico">✓</span>My titles</button>
+  <button data-tab="setup"><span class="ico">⚙</span>Setup</button>
+</nav>
 
 <main>
   <section id="browse">
-    <form id="search-form" class="filters">
-      <input id="q" placeholder="Search any movie or show" autocomplete="off">
-      <button>Search</button>
+    <form id="search-form" class="searchbar" role="search">
+      <input id="q" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off"
+        placeholder="A title, an actor, or what it's about">
+      <button class="primary">Go</button>
     </form>
+    <p class="hint">Try "Tiger King", "Tom Hanks", "bank heist", or "nurse who killed patients".</p>
+
     <div id="cats" class="chips"></div>
-    <div class="filters small">
-      <select id="b-type">
-        <option value="all">Movies and shows</option>
-        <option value="movie">Movies</option>
-        <option value="tv">Shows</option>
-      </select>
-      <select id="b-sort">
-        <option value="popular">Most popular</option>
-        <option value="top">Highest rated</option>
-        <option value="new">Newest</option>
-      </select>
-      <label class="check"><input type="checkbox" id="b-mine"> Only my services</label>
-      <label class="check"><input type="checkbox" id="b-hide" checked> Hide ones I've rated</label>
+    <div id="subcats" class="chips sub" hidden></div>
+
+    <div id="search-results" hidden>
+      <div id="suggest" class="suggest"></div>
+      <p id="search-msg" class="msg"></p>
+      <div id="search-grid" class="grid"></div>
+      <div id="topic" hidden>
+        <h2 id="topic-label"></h2>
+        <div id="topic-grid" class="grid"></div>
+      </div>
     </div>
-    <p id="browse-msg" class="msg">Pick a category or search for a title.</p>
-    <div id="browse-grid" class="grid"></div>
-    <button id="more" class="more" hidden>Show more</button>
+
+    <div id="browse-results">
+      <div class="filters small">
+        <select id="b-type" aria-label="Type">
+          <option value="all">Movies and shows</option>
+          <option value="movie">Movies</option>
+          <option value="tv">Shows</option>
+        </select>
+        <select id="b-sort" aria-label="Sort">
+          <option value="popular">Most popular</option>
+          <option value="top">Highest rated</option>
+          <option value="new">Newest</option>
+        </select>
+        <label class="check"><input type="checkbox" id="b-mine"> Only my services</label>
+        <label class="check"><input type="checkbox" id="b-hide" checked> Hide ones I've rated</label>
+      </div>
+      <p id="browse-msg" class="msg">Search above, or pick a category.</p>
+      <div id="browse-grid" class="grid"></div>
+      <button id="more" class="more" hidden>Show more</button>
+    </div>
   </section>
 
   <section id="foryou" hidden>
     <div class="filters">
-      <select id="type">
+      <select id="type" aria-label="Type">
         <option value="all">Movies and shows</option>
         <option value="movie">Movies</option>
         <option value="tv">Shows</option>
@@ -55,7 +82,7 @@
       <datalist id="genres"></datalist>
       <button id="go" class="primary">Find something</button>
     </div>
-    <p id="foryou-msg" class="msg">Based on everything you've loved and liked. Things you didn't like push similar titles down.</p>
+    <p id="foryou-msg" class="msg">Based on what you loved and liked. Things you didn't like push similar titles down.</p>
     <div id="foryou-grid" class="grid"></div>
   </section>
 
@@ -71,9 +98,25 @@
   </section>
 
   <section id="setup" hidden>
+    <div class="card" id="key-card">
+      <h2>1. Your free TMDB key</h2>
+      <p>TMDB is the free movie database this app looks things up in. It needs a key once.</p>
+      <ol class="steps">
+        <li>Make a free account at <a href="https://www.themoviedb.org/signup" target="_blank" rel="noopener">themoviedb.org</a>.</li>
+        <li>Open <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">Settings → API</a> and request a key. Pick Developer, and for the purpose write something like "personal watch list".</li>
+        <li>Copy the <b>API Read Access Token</b> (the long one) or the <b>API Key</b>, and paste it here.</li>
+      </ol>
+      <form id="key-form" class="searchbar">
+        <input id="key" type="password" autocomplete="off" placeholder="Paste key here">
+        <button class="primary">Save</button>
+      </form>
+      <p id="key-msg" class="msg"></p>
+      <p id="key-state" class="msg ok"></p>
+    </div>
+
     <div class="card">
-      <h2>Your streaming services</h2>
-      <p>Netflix, Disney+ and the rest don't let other apps see your account, so tick what you pay for. Those get a ring on every card.</p>
+      <h2>2. Your streaming services</h2>
+      <p>Tick what you pay for. Those get a green ring on every card.</p>
       <label>Country
         <select id="region"></select>
       </label>
@@ -83,8 +126,25 @@
     </div>
 
     <div class="card">
+      <h2>3. Put it on your home screen</h2>
+      <p><b>iPhone:</b> open this page in Safari, tap the Share button, then <b>Add to Home Screen</b>.<br>
+        <b>Android:</b> in Chrome, tap the ⋮ menu, then <b>Add to Home screen</b> or <b>Install app</b>.</p>
+      <p class="msg">It then opens like an app. On iPhone this also keeps Safari from clearing your list if you go a while without opening it.</p>
+    </div>
+
+    <div class="card">
+      <h2>Backup</h2>
+      <p>Your list lives on this phone only. Save a backup now and then, or to move it to another device.</p>
+      <div class="filters">
+        <button id="backup">Save backup</button>
+        <label class="file">Restore from backup <input type="file" id="restore" accept=".json,application/json"></label>
+      </div>
+      <p id="backup-msg" class="msg"></p>
+    </div>
+
+    <div class="card">
       <h2>Import from IMDb (optional)</h2>
-      <p>If you have IMDb history: open Your Ratings (or your Watchlist), click the three dots, choose Export, and upload the file here. Importing again replaces the last import but keeps everything you marked in this app.</p>
+      <p>On IMDb, open Your Ratings (or your Watchlist), tap the three dots, choose Export, and pick the file here.</p>
       <label class="file">Ratings CSV <input type="file" accept=".csv" data-import></label>
       <label class="file">Watchlist CSV <input type="file" accept=".csv" data-import></label>
       <p id="import-msg" class="msg"></p>

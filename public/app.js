@@ -1,3 +1,5 @@
+import { createApi, browserStore } from './lib/api.js';
+
 const $ = (s) => document.querySelector(s);
 const IMG = 'https://image.tmdb.org/t/p';
 const REGIONS = {
@@ -16,19 +18,9 @@ const WHY = {
   bad: ['Too slow', 'Boring', 'Too violent', 'Too dark', 'Bad ending', 'Bad acting', 'Not my genre', "Didn't finish"],
 };
 
+const api = createApi({ store: browserStore() });
 let status;
 const items = new Map(); // "type:id" -> item, shared by every tab
-
-async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    ...opts,
-    headers: opts.body ? { 'content-type': 'application/json' } : {},
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || res.statusText);
-  return data;
-}
 
 const esc = (s = '') => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const keyOf = (it) => `${it.type}:${it.tmdbId}`;
@@ -97,15 +89,15 @@ function renderGrid(sel, list, append = false) {
 }
 
 function rerender(it) {
-  document.querySelectorAll(`[data-key="${keyOf(it)}"]`).forEach((el) => (el.outerHTML = card(it)));
+  document.querySelectorAll(`[data-key="${keyOf(it)}"]`).forEach((el) => {
+    const dim = el.classList.contains('dim');
+    el.outerHTML = card(it);
+    if (dim) document.querySelector(`[data-key="${keyOf(it)}"]`)?.classList.add('dim');
+  });
 }
 
 async function saveRating(it, reaction, reasons, note) {
-  const res = await api('/api/titles', {
-    method: 'POST',
-    body: { list: 'ratings', type: it.type, tmdbId: it.tmdbId, reaction, reasons, note },
-  });
-  it.mine = res.mine;
+  it.mine = (await api.mark({ list: 'ratings', type: it.type, tmdbId: it.tmdbId, reaction, reasons, note })).mine;
 }
 
 async function onCard(e) {
@@ -119,16 +111,16 @@ async function onCard(e) {
   try {
     if (e.type === 'click' && btn?.dataset.act === 'want') {
       if (m.want) {
-        await api('/api/titles/remove', { method: 'POST', body: { ...ref, list: 'watchlist' } });
+        api.unmark({ ...ref, list: 'watchlist' });
         it.mine = { ...m, want: false };
       } else {
-        it.mine = (await api('/api/titles', { method: 'POST', body: { ...ref, list: 'watchlist' } })).mine;
+        it.mine = (await api.mark({ ...ref, list: 'watchlist' })).mine;
       }
     } else if (e.type === 'click' && btn?.dataset.act) {
       const act = btn.dataset.act;
       if (m.reaction === act) {
-        // Clicking the active reaction again clears it.
-        await api('/api/titles/remove', { method: 'POST', body: { ...ref, list: 'ratings' } });
+        // Tapping the active reaction again clears it.
+        api.unmark({ ...ref, list: 'ratings' });
         it.mine = { ...m, reaction: null, reasons: [], note: '' };
       } else {
         // Keep reasons when switching between love and like; they still apply.
@@ -152,62 +144,102 @@ async function onCard(e) {
 document.addEventListener('click', onCard);
 document.addEventListener('change', onCard);
 
-// --- browse ----------------------------------------------------------------
-const browseState = { category: null, q: null, page: 1, totalPages: 0 };
+// --- browse & search ---------------------------------------------------------
+const browseState = { category: null, sub: null, page: 1, totalPages: 0 };
+let trueCrimeSubs = [];
 
 async function loadCategories() {
-  const cats = await api('/api/categories');
-  $('#cats').innerHTML = cats.map((c) => `<button data-cat="${c.key}">${esc(c.name)}</button>`).join('');
+  const { categories, trueCrime } = api.categories();
+  trueCrimeSubs = trueCrime;
+  $('#cats').innerHTML = categories.map((c) => `<button data-cat="${c.key}">${esc(c.name)}</button>`).join('');
+}
+
+function renderChips() {
+  document.querySelectorAll('#cats button').forEach((x) => x.classList.toggle('on', x.dataset.cat === browseState.category));
+  const subs = browseState.category === 'true-crime';
+  $('#subcats').hidden = !subs;
+  if (subs) {
+    $('#subcats').innerHTML = [{ key: '', name: 'All true crime' }, ...trueCrimeSubs]
+      .map((s) => `<button data-sub="${s.key}" class="${(browseState.sub ?? '') === s.key ? 'on' : ''}">${esc(s.name)}</button>`).join('');
+  }
+}
+
+function openCategory(category, sub = null) {
+  browseState.category = category;
+  browseState.sub = sub;
+  $('#q').value = '';
+  $('#search-results').hidden = true;
+  $('#browse-results').hidden = false;
+  renderChips();
+  loadBrowse();
 }
 
 async function loadBrowse(append = false) {
-  const { category, q } = browseState;
-  if (!category && !q) return;
+  if (!browseState.category) return;
   if (!append) { browseState.page = 1; $('#browse-grid').innerHTML = ''; }
   $('#more').hidden = true;
   show('#browse-msg', 'Loading…');
   try {
-    let r;
-    if (q) {
-      r = await api('/api/search?q=' + encodeURIComponent(q));
-      r.totalPages = 1;
-    } else {
-      const p = new URLSearchParams({
-        category, page: browseState.page, type: $('#b-type').value, sort: $('#b-sort').value,
-        onlyMine: $('#b-mine').checked ? '1' : '0', hideRated: $('#b-hide').checked ? '1' : '0',
-      });
-      r = await api('/api/browse?' + p);
-    }
+    const r = await api.browse({
+      category: browseState.category, sub: browseState.sub, page: browseState.page,
+      type: $('#b-type').value, sort: $('#b-sort').value,
+      onlyMine: $('#b-mine').checked, hideRated: $('#b-hide').checked,
+    });
     browseState.totalPages = r.totalPages;
     renderGrid('#browse-grid', r.items, append);
     const count = $('#browse-grid').children.length;
-    show('#browse-msg', count
-      ? (status.services.length ? 'Ringed logos are services you have. Tap a logo to see all options.' : 'Tick your services in Setup to see which of these you already have.')
-      : (q ? 'No matches.' : 'Nothing here with these filters.'));
+    show('#browse-msg', count ? legend() : 'Nothing here with these filters.');
     $('#more').hidden = browseState.page >= browseState.totalPages;
   } catch (e) { show('#browse-msg', e.message, true); }
 }
 
+const legend = () => (status.services.length
+  ? 'Green ring = a service you have. Tap a logo for every way to watch.'
+  : 'Tick your services in Setup and they get a green ring.');
+
+async function runSearch(q) {
+  browseState.category = null;
+  renderChips();
+  $('#browse-results').hidden = true;
+  $('#search-results').hidden = false;
+  $('#search-grid').innerHTML = '';
+  $('#topic').hidden = true;
+  $('#suggest').innerHTML = '';
+  show('#search-msg', 'Searching…');
+  try {
+    const r = await api.search(q);
+    $('#suggest').innerHTML = r.suggestions
+      .map((s) => `<button data-go-cat="${s.category}" data-go-sub="${s.sub ?? ''}">See all: ${esc(s.label)}</button>`).join('');
+    renderGrid('#search-grid', r.items);
+    if (r.topic) {
+      $('#topic').hidden = false;
+      $('#topic-label').textContent = `About: ${r.topic.label}`;
+      renderGrid('#topic-grid', r.topic.items);
+    }
+    const n = r.items.length + (r.topic?.items.length ?? 0);
+    show('#search-msg', n ? legend() : r.suggestions.length ? 'No titles matched, but try the category above.' : 'Nothing matched. Try fewer words, or a name from the cast.');
+  } catch (e) { show('#search-msg', e.message, true); }
+}
+
 $('#cats').addEventListener('click', (e) => {
   const b = e.target.closest('[data-cat]');
-  if (!b) return;
-  document.querySelectorAll('#cats button').forEach((x) => x.classList.toggle('on', x === b));
-  browseState.category = b.dataset.cat;
-  browseState.q = null;
-  $('#q').value = '';
-  loadBrowse();
+  if (b) openCategory(b.dataset.cat);
 });
-
+$('#subcats').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-sub]');
+  if (b) openCategory('true-crime', b.dataset.sub || null);
+});
+$('#suggest').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-go-cat]');
+  if (b) openCategory(b.dataset.goCat, b.dataset.goSub || null);
+});
 $('#search-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const q = $('#q').value.trim();
   if (!q) return;
-  document.querySelectorAll('#cats button').forEach((x) => x.classList.remove('on'));
-  browseState.q = q;
-  browseState.category = null;
-  loadBrowse();
+  $('#q').blur(); // drop the phone keyboard so results are visible
+  runSearch(q);
 });
-
 for (const id of ['#b-type', '#b-sort', '#b-mine', '#b-hide']) {
   $(id).addEventListener('change', () => browseState.category && loadBrowse());
 }
@@ -218,12 +250,10 @@ async function loadRecs() {
   $('#foryou-grid').innerHTML = '';
   show('#foryou-msg', 'Working. The first run can take a minute.');
   try {
-    const q = new URLSearchParams({ type: $('#type').value });
-    if ($('#genre').value.trim()) q.set('genre', $('#genre').value.trim());
-    const r = await api('/api/recommendations?' + q);
+    const r = await api.recommendations({ type: $('#type').value, genre: $('#genre').value.trim() || null });
     if (r.reason === 'no-seeds') return show('#foryou-msg', 'Mark a few titles as Loved it or Liked it first. Browse is the quickest way.');
     if (!r.items.length) return show('#foryou-msg', status.services.length ? 'Nothing matched your services. Try another filter, or count rent/buy in Setup.' : 'No results.');
-    show('#foryou-msg', status.services.length ? 'Only showing what\'s on your services.' : 'Not filtered by service yet. Tick yours in Setup.');
+    show('#foryou-msg', status.services.length ? "Only showing what's on your services." : 'Not filtered by service yet. Tick yours in Setup.');
     renderGrid('#foryou-grid', r.items);
   } catch (e) { show('#foryou-msg', e.message, true); }
 }
@@ -232,8 +262,8 @@ async function loadWatchlist() {
   $('#watchlist-grid').innerHTML = '';
   show('#watchlist-msg', 'Checking…');
   try {
-    const { items: list } = await api('/api/watchlist');
-    if (!list.length) return show('#watchlist-msg', 'Nothing here yet. Hit "Want to watch" on anything in Browse.');
+    const { items: list } = await api.watchlist();
+    if (!list.length) return show('#watchlist-msg', 'Nothing here yet. Tap "+ Watchlist" on anything in Browse.');
     const ready = list.filter((i) => i.available);
     show('#watchlist-msg', `${ready.length} of ${list.length} are streaming now${status.services.length ? ' on your services' : ''}.`);
     renderGrid('#watchlist-grid', list);
@@ -246,7 +276,7 @@ async function loadMine() {
   $('#mine-grid').innerHTML = '';
   show('#mine-msg', 'Loading…');
   try {
-    const r = await api('/api/titles?show=' + mineShow);
+    const r = await api.titles(mineShow);
     const labels = { love: 'Loved', like: 'Liked', dislike: "Didn't like", want: 'Want to watch' };
     $('#mine-tabs').innerHTML = Object.entries(labels)
       .map(([k, l]) => `<button data-show="${k}" class="${k === mineShow ? 'on' : ''}">${l} (${r.counts[k]})</button>`).join('');
@@ -261,19 +291,20 @@ $('#mine-tabs').addEventListener('click', (e) => {
 
 // --- setup -------------------------------------------------------------------
 async function loadProviders() {
-  if (!status.hasKey) return show('#settings-msg', 'Add TMDB_API_KEY to .env and restart to pick services.', true);
+  if (!status.hasKey) { $('#providers').innerHTML = ''; return; }
   try {
-    const list = await api('/api/providers?region=' + status.region);
+    const list = await api.providers(status.region);
     $('#providers').innerHTML = list.slice(0, 60).map((p) => `<label class="prov" title="${esc(p.name)}">
       <input type="checkbox" value="${p.id}" ${status.services.includes(p.id) ? 'checked' : ''}>
       ${p.logo ? `<img src="${IMG}/w92${p.logo}" alt="">` : ''}<span>${esc(p.name)}</span></label>`).join('');
+    show('#settings-msg', '');
   } catch (e) { show('#settings-msg', e.message, true); }
 }
 
-async function saveSettings() {
+function saveSettings() {
   const services = [...document.querySelectorAll('#providers input:checked')].map((i) => Number(i.value));
-  await api('/api/settings', { method: 'POST', body: { services, includeRentBuy: $('#rentbuy').checked, minSeedRating: Number($('#minseed').value) } });
-  await refresh();
+  api.settings({ services, includeRentBuy: $('#rentbuy').checked, minSeedRating: Number($('#minseed').value) });
+  refresh();
 }
 
 function renderStatus() {
@@ -286,19 +317,35 @@ function renderStatus() {
   $('#genres').innerHTML = status.topGenres.map((g) => `<option value="${esc(g)}">`).join('');
   $('#b-mine').disabled = !status.services.length;
   if (!status.services.length) $('#b-mine').checked = false;
+  $('#key-card').classList.toggle('done', status.hasKey);
+  $('#key-state').textContent = status.hasKey ? 'Key saved on this phone. ✓' : '';
 }
 
-async function refresh() {
-  status = await api('/api/status');
+function refresh() {
+  status = api.status();
   renderStatus();
 }
+
+$('#key-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  show('#key-msg', 'Checking…');
+  try {
+    await api.setKey($('#key').value);
+    $('#key').value = '';
+    show('#key-msg', 'That works.');
+    refresh();
+    await loadProviders();
+  } catch (err) {
+    show('#key-msg', /rejected/.test(err.message) ? "TMDB didn't accept that key. Copy it again from your TMDB settings." : err.message, true);
+  }
+});
 
 $('#rentbuy').addEventListener('change', saveSettings);
 $('#minseed').addEventListener('change', saveSettings);
 $('#providers').addEventListener('change', saveSettings);
 $('#region').addEventListener('change', async () => {
-  await api('/api/settings', { method: 'POST', body: { region: $('#region').value, services: [] } });
-  await refresh();
+  api.settings({ region: $('#region').value, services: [] });
+  refresh();
   await loadProviders();
 });
 
@@ -306,29 +353,59 @@ document.querySelectorAll('[data-import]').forEach((input) => input.addEventList
   const file = input.files[0];
   if (!file) return;
   try {
-    const r = await api('/api/import', { method: 'POST', body: { csv: await file.text() } });
+    const r = api.importCsv(await file.text());
     show('#import-msg', `Imported ${r.count} ${r.kind === 'ratings' ? 'rated titles' : 'watchlist titles'}.`);
-    await refresh();
+    refresh();
   } catch (e) { show('#import-msg', e.message, true); }
   input.value = '';
 }));
 
+$('#backup').addEventListener('click', () => {
+  const blob = new Blob([api.exportData()], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `what-to-watch-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+$('#restore').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const r = api.importData(await file.text());
+    show('#backup-msg', `Restored ${r.ratings} rated and ${r.watchlist} watchlist titles.`);
+    refresh();
+    await loadProviders();
+  } catch (err) { show('#backup-msg', err.message, true); }
+  e.target.value = '';
+});
+
 $('#reset').addEventListener('click', async () => {
-  if (!confirm('Delete everything you marked, imported and set up?')) return;
-  await api('/api/profile', { method: 'DELETE' });
-  await refresh();
+  if (!confirm('Delete everything you marked and set up on this phone?')) return;
+  api.reset();
+  refresh();
   await loadProviders();
 });
 
 // --- tabs ------------------------------------------------------------------
-document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
-  document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('on', x === b));
-  document.querySelectorAll('main > section').forEach((s) => (s.hidden = s.id !== b.dataset.tab));
-  if (b.dataset.tab === 'watchlist') loadWatchlist();
-  if (b.dataset.tab === 'mine') loadMine();
-}));
+function openTab(name) {
+  document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('on', x.dataset.tab === name));
+  document.querySelectorAll('main > section').forEach((s) => (s.hidden = s.id !== name));
+  if (name === 'watchlist') loadWatchlist();
+  if (name === 'mine') loadMine();
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.tab)));
 $('#go').addEventListener('click', loadRecs);
 
-await refresh();
-await Promise.all([loadProviders(), loadCategories()]);
-if (!status.hasKey) document.querySelector('[data-tab=setup]').click();
+refresh();
+loadCategories();
+loadProviders();
+if (!status.hasKey) openTab('setup');
+
+// Ask the browser not to clear our storage (Safari otherwise can after a week
+// of not opening the site, unless it's been added to the home screen).
+navigator.storage?.persist?.().catch(() => {});
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}

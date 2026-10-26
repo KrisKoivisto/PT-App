@@ -1,10 +1,12 @@
 {
   "name": "pt-app",
   "version": "0.1.0",
-  "description": "Find movies and shows to watch based on your IMDb history and the streaming services you have.",
+  "description": "Phone app (PWA) that tells you where a movie or show is streaming and keeps your own watched list.",
   "type": "module",
   "private": true,
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
     "test": "node --test test/*.test.js"
