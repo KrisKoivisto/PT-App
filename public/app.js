@@ -1,5 +1,6 @@
 import { createApi, browserStore, safeStorage } from './lib/api.js';
 import { demoFetch } from './lib/demo.js';
+import { reasonsFor } from './lib/reasons.js';
 
 const $ = (s) => document.querySelector(s);
 const IMG = 'https://image.tmdb.org/t/p';
@@ -14,10 +15,6 @@ const REACTIONS = [
   ['like', 'Liked it', 'up'],
   ['dislike', 'Not for me', 'down'],
 ];
-const WHY = {
-  good: ['Story', 'Characters', 'Acting', 'Funny', 'Suspense', 'Twists', 'Looks great', 'Rewatchable'],
-  bad: ['Too slow', 'Boring', 'Too violent', 'Too dark', 'Bad ending', 'Bad acting', 'Not my genre', "Didn't finish"],
-};
 
 const PATHS = {
   heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
@@ -189,7 +186,7 @@ function titleView(view) {
     it.type === 'tv' ? (it.seasons ? `${it.seasons} season${it.seasons > 1 ? 's' : ''}` : 'Series') : it.runtime ? `${Math.floor(it.runtime / 60)}h ${it.runtime % 60}m` : 'Film',
     it.genres.slice(0, 3).join(', '),
   ].filter(Boolean).join(' · ');
-  const why = m.reaction ? WHY[m.reaction === 'dislike' ? 'bad' : 'good'] : null;
+  const why = m.reaction ? reasonsFor(it, m.reaction, m.reasons) : null;
   const rent = it.rentBuy ?? [];
 
   return `<div class="hero">
@@ -224,9 +221,10 @@ function titleView(view) {
         ${REACTIONS.map(([k, label, ic]) => `<button data-act="${k}" class="take ${k}${m.reaction === k ? ' on' : ''}" aria-pressed="${m.reaction === k}">${icon(ic, m.reaction === k)}<span>${label}</span></button>`).join('')}
         <button data-act="want" class="take want${m.want ? ' on' : ''}" aria-pressed="${!!m.want}">${icon('bookmark', m.want)}<span>${m.want ? 'On watchlist' : 'Watchlist'}</span></button>
       </div>
-      ${why ? `<div class="why">
+      ${why ? `<p class="why-label">${m.reaction === 'dislike' ? "What didn't work?" : 'What stood out?'} <span>Tap any that fit</span></p>
+      <div class="why">
         ${why.map((r) => `<button data-reason="${esc(r)}" class="${m.reasons.includes(r) ? 'on' : ''}">${esc(r)}</button>`).join('')}
-        <input id="note" data-note placeholder="Why? (optional)" value="${esc(m.note)}" maxlength="300">
+        <input id="note" data-note placeholder="Anything else? (optional)" value="${esc(m.note)}" maxlength="300">
       </div>` : ''}
     </section>
 

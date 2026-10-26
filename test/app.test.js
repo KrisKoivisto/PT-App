@@ -7,6 +7,7 @@ import { createApi, browserStore } from '../public/lib/api.js';
 import { matchCategories } from '../public/lib/browse.js';
 import { createServer } from '../server.js';
 import { demoFetch } from '../public/lib/demo.js';
+import { reasonsFor, kindOf } from '../public/lib/reasons.js';
 
 const RATINGS = `Const,Your Rating,Date Rated,Title,Original Title,URL,Title Type,IMDb Rating,Runtime (mins),Year,Genres,Num Votes,Release Date,Directors
 tt0000001,10,2024-01-01,"Seed, The Movie",,https://x,movie,8.0,100,2000,"Drama, Sci-Fi",1000,2000-01-01,A
@@ -412,4 +413,23 @@ test('sample mode works end to end with no network', async () => {
   r = await api.recommendations();
   assert.ok(r.items.length > 0);
   assert.ok(r.items.every((i) => i.services.length), 'filtered to Netflix/Hulu');
+});
+
+test('reasons fit the kind of title', () => {
+  const tc = { genres: ['Documentary', 'Crime'] };
+  assert.equal(kindOf(tc), 'truecrime');
+  assert.ok(reasonsFor(tc, 'love').includes('Gripping case'));
+  assert.ok(reasonsFor(tc, 'dislike').includes('Too graphic'));
+  assert.equal(reasonsFor(tc, 'dislike').at(-1), "Didn't finish");
+
+  assert.equal(kindOf({ genres: ['Comedy'] }), 'comedy');
+  assert.equal(kindOf({ genres: ['Comedy', 'Romance'] }), 'romance');
+  assert.equal(kindOf({ genres: ['Crime', 'Drama'] }), 'crime');
+  assert.equal(kindOf({ genres: ['Sci-Fi & Fantasy', 'Drama'] }), 'spectacle');
+  assert.equal(kindOf({ genres: ['Animation', 'Comedy'] }), 'family');
+  assert.equal(kindOf({ genres: [] }), 'drama');
+  assert.ok(reasonsFor({ genres: ['Comedy'] }, 'like').includes('Laughed out loud'));
+
+  // An old pick from another list still shows so it can be turned off
+  assert.ok(reasonsFor({ genres: ['Comedy'] }, 'like', ['Story']).includes('Story'));
 });
