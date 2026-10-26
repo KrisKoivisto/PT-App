@@ -210,12 +210,28 @@ export function createApi({ store, base, fetchImpl }) {
   };
 }
 
+// Storage that never throws: some browsers (private windows, locked-down
+// frames) refuse localStorage outright, and then the app runs from memory.
+export function safeStorage() {
+  try {
+    const ls = globalThis.localStorage;
+    ls.getItem('wtw.probe');
+    return ls;
+  } catch {
+    const m = new Map();
+    return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) };
+  }
+}
+
 // localStorage-backed store for the browser. The response cache is capped so
 // it can't fill the ~5 MB quota; on a quota error it shrinks and tries again.
-export function browserStore(ls = localStorage) {
-  const read = (k) => { try { return JSON.parse(ls.getItem(k)); } catch { return null; } };
-  const write = (k, v) => { try { ls.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
-  const cache = { data: read('wtw.cache') ?? {} };
+// `prefix` keeps sample mode's data apart from the real list.
+export function browserStore(ls = safeStorage(), prefix = 'wtw.') {
+  const k = (name) => prefix + name;
+  const read = (name) => { try { return JSON.parse(ls.getItem(k(name))); } catch { return null; } };
+  const write = (name, v) => { try { ls.setItem(k(name), JSON.stringify(v)); return true; } catch { return false; } };
+  const remove = (name) => { try { ls.removeItem(k(name)); } catch {} };
+  const cache = { data: read('cache') ?? {} };
   let timer;
   cache.save = () => {
     clearTimeout(timer);
@@ -223,22 +239,22 @@ export function browserStore(ls = localStorage) {
       for (const cap of [400, 150, 40, 0]) {
         const keep = Object.entries(cache.data).sort((a, b) => b[1].t - a[1].t).slice(0, cap);
         cache.data = Object.fromEntries(keep);
-        if (write('wtw.cache', cache.data)) return;
+        if (write('cache', cache.data)) return;
       }
     }, 500);
   };
   return {
     cache,
-    loadProfile: () => read('wtw.profile'),
+    loadProfile: () => read('profile'),
     saveProfile: (p) => {
-      if (!write('wtw.profile', p)) {
+      if (!write('profile', p)) {
         // Make room by dropping the cache, then retry: the profile matters more.
-        ls.removeItem('wtw.cache');
+        remove('cache');
         cache.data = {};
-        if (!write('wtw.profile', p)) throw fail('Your phone ran out of storage for this app.');
+        if (!write('profile', p)) throw fail('Your phone ran out of storage for this app.');
       }
     },
-    loadKey: () => ls.getItem('wtw.key'),
-    saveKey: (k) => ls.setItem('wtw.key', k),
+    loadKey: () => { try { return ls.getItem(k('key')); } catch { return null; } },
+    saveKey: (key) => { try { ls.setItem(k('key'), key); } catch {} },
   };
 }

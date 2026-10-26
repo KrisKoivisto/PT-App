@@ -161,9 +161,13 @@ export function matchCategories(q) {
 async function topicKeywords(tmdb, q) {
   const n = norm(q);
   const exact = async (word) => {
-    const list = await tmdb.keywords(word);
-    const want = [word, word.replace(/s$/, ''), word.replace(/ies$/, 'y')];
-    return list.find((k) => want.includes(k.name.toLowerCase())) ?? null;
+    // Try the word as typed, then its singular ("patients" -> "patient").
+    const forms = [...new Set([word, word.replace(/ies$/, 'y'), word.replace(/s$/, '')])];
+    for (const f of forms) {
+      const hit = (await tmdb.keywords(f)).find((k) => forms.includes(k.name.toLowerCase()));
+      if (hit) return hit;
+    }
+    return null;
   };
   const whole = n.split(' ').length > 1 ? await exact(n) : null;
   if (whole) return [whole];

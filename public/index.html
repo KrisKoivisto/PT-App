@@ -18,6 +18,10 @@
 <body>
 <header>
   <h1>What to Watch</h1>
+  <p id="demo-banner" class="banner" hidden>
+    Sample mode: these titles are made up, so you can try everything. The real app looks up every movie and show live.
+    <a id="demo-exit" href="./">Use the real app</a>
+  </p>
 </header>
 
 <nav>
@@ -35,7 +39,7 @@
         placeholder="A title, an actor, or what it's about">
       <button class="primary">Go</button>
     </form>
-    <p class="hint">Try "Tiger King", "Tom Hanks", "bank heist", or "nurse who killed patients".</p>
+    <p class="hint">Try a title, an actor, "bank heist", or "nurse who killed patients".</p>
 
     <div id="cats" class="chips"></div>
     <div id="subcats" class="chips sub" hidden></div>
@@ -112,6 +116,7 @@
       </form>
       <p id="key-msg" class="msg"></p>
       <p id="key-state" class="msg ok"></p>
+      <p class="msg">Just want to look around first? <a href="?demo">Try it with sample data</a>.</p>
     </div>
 
     <div class="card">
@@ -132,7 +137,7 @@
       <p class="msg">It then opens like an app. On iPhone this also keeps Safari from clearing your list if you go a while without opening it.</p>
     </div>
 
-    <div class="card">
+    <div class="card" id="backup-card">
       <h2>Backup</h2>
       <p>Your list lives on this phone only. Save a backup now and then, or to move it to another device.</p>
       <div class="filters">
@@ -142,7 +147,7 @@
       <p id="backup-msg" class="msg"></p>
     </div>
 
-    <div class="card">
+    <div class="card" id="imdb-card">
       <h2>Import from IMDb (optional)</h2>
       <p>On IMDb, open Your Ratings (or your Watchlist), tap the three dots, choose Export, and pick the file here.</p>
       <label class="file">Ratings CSV <input type="file" accept=".csv" data-import></label>
@@ -161,6 +166,8 @@
     </div>
   </section>
 </main>
+
+<div id="toast" class="toast" role="status" hidden></div>
 
 <footer>
   Streaming availability data from JustWatch via TMDB.

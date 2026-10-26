@@ -6,6 +6,7 @@ import { parseImdbCsv } from '../public/lib/imdb.js';
 import { createApi, browserStore } from '../public/lib/api.js';
 import { matchCategories } from '../public/lib/browse.js';
 import { createServer } from '../server.js';
+import { demoFetch } from '../public/lib/demo.js';
 
 const RATINGS = `Const,Your Rating,Date Rated,Title,Original Title,URL,Title Type,IMDb Rating,Runtime (mins),Year,Genres,Num Votes,Release Date,Directors
 tt0000001,10,2024-01-01,"Seed, The Movie",,https://x,movie,8.0,100,2000,"Drama, Sci-Fi",1000,2000-01-01,A
@@ -381,4 +382,34 @@ test('static server serves the app and nothing outside it', async () => {
     res = await fetch(base + '/%2e%2e/package.json');
     assert.ok([403, 404].includes(res.status));
   } finally { server.close(); }
+});
+
+test('sample mode works end to end with no network', async () => {
+  const api = createApi({ store: memStore('sample'), fetchImpl: demoFetch });
+  api.settings({ services: [8, 15] });
+
+  let r = await api.search('bank heist');
+  assert.deepEqual(r.suggestions.map((x) => x.label), ['True crime › Heists & robberies']);
+  assert.deepEqual(r.items.map((i) => i.title), ['Heist Week']);
+  assert.deepEqual(r.topic.items.map((i) => i.title), ['The Vault Under Fifth Street']);
+
+  r = await api.search('nurse who killed patients');
+  assert.equal(r.topic.label, 'nurse + patient');
+  assert.deepEqual(r.topic.items.map((i) => i.title), ['Night Shift: The Hospital Murders']);
+
+  r = await api.browse({ category: 'true-crime', sub: 'heist' });
+  assert.deepEqual(r.items.map((i) => i.title), ['The Vault Under Fifth Street', 'Heist Week', 'Getaway Driver']);
+  assert.deepEqual(r.items[2].rentBuy.map((p) => p.name), ['Prime Video', 'Apple TV+']);
+  assert.deepEqual(r.items[0].services.map((p) => p.name), ['Netflix']);
+
+  r = await api.browse({ category: 'true-crime', sub: 'love' });
+  assert.deepEqual(r.items.map((i) => i.title), ['Sweetheart, Interrupted', 'The Poisoner Next Door']);
+
+  r = await api.browse({ category: 'comedy' });
+  assert.deepEqual(r.items.map((i) => i.title).sort(), ['Laugh Track', 'The Last Laugh Tour']);
+
+  await api.mark({ list: 'ratings', type: 'tv', tmdbId: 112, reaction: 'love' });
+  r = await api.recommendations();
+  assert.ok(r.items.length > 0);
+  assert.ok(r.items.every((i) => i.services.length), 'filtered to Netflix/Hulu');
 });

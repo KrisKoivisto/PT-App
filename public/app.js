@@ -1,4 +1,5 @@
-import { createApi, browserStore } from './lib/api.js';
+import { createApi, browserStore, safeStorage } from './lib/api.js';
+import { demoFetch } from './lib/demo.js';
 
 const $ = (s) => document.querySelector(s);
 const IMG = 'https://image.tmdb.org/t/p';
@@ -18,12 +19,31 @@ const WHY = {
   bad: ['Too slow', 'Boring', 'Too violent', 'Too dark', 'Bad ending', 'Bad acting', 'Not my genre', "Didn't finish"],
 };
 
-const api = createApi({ store: browserStore() });
+// Sample mode: made-up titles and no TMDB key needed. On with ?demo, or when
+// the page that loads this sets window.WTW_DEMO (the shareable preview).
+const DEMO = !!window.WTW_DEMO || new URLSearchParams(location.search).has('demo');
+const store = DEMO ? browserStore(safeStorage(), 'wtw.demo.') : browserStore();
+if (DEMO && !store.loadKey()) {
+  store.saveKey('sample');
+  store.saveProfile({ services: [8, 15] }); // Netflix and Hulu, so the rings show
+}
+const api = createApi({ store, fetchImpl: DEMO ? demoFetch : undefined });
+const img = (size, path) => (path.startsWith('data:') ? path : `${IMG}/${size}${path}`);
 let status;
 const items = new Map(); // "type:id" -> item, shared by every tab
 
 const esc = (s = '') => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const keyOf = (it) => `${it.type}:${it.tmdbId}`;
+
+// Brief message at the bottom of the screen (the app can't rely on alert()).
+let toastTimer;
+function toast(msg) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 3500);
+}
 
 function show(id, msg, isErr) {
   const el = $(id);
@@ -41,11 +61,11 @@ function whereToWatch(it) {
     return `<span class="none">${it.rentBuy?.length ? 'Rent or buy only' : `Not streaming in ${status.region}`}</span>`;
   }
   return list.map((p) => {
-    const img = p.logo ? `<img src="${IMG}/w92${p.logo}" alt="${esc(p.name)}">` : `<span class="pname">${esc(p.name)}</span>`;
+    const pic = p.logo ? `<img src="${img('w92', p.logo)}" alt="${esc(p.name)}">` : `<span class="pname">${esc(p.name)}</span>`;
     const cls = have.has(p.id) ? 'logo yours' : 'logo';
     return it.link
-      ? `<a class="${cls}" title="${esc(p.name)}" href="${esc(it.link)}" target="_blank" rel="noopener">${img}</a>`
-      : `<span class="${cls}" title="${esc(p.name)}">${img}</span>`;
+      ? `<a class="${cls}" title="${esc(p.name)}" href="${esc(it.link)}" target="_blank" rel="noopener">${pic}</a>`
+      : `<span class="${cls}" title="${esc(p.name)}">${pic}</span>`;
   }).join('');
 }
 
@@ -60,7 +80,7 @@ function card(it) {
 
   return `<article class="item${m.reaction ? ' marked' : ''}" data-key="${keyOf(it)}">
     <div class="top">
-      ${it.poster ? `<img class="poster" loading="lazy" src="${IMG}/w185${it.poster}" alt="">` : '<div class="poster"></div>'}
+      ${it.poster ? `<img class="poster" loading="lazy" src="${img('w185', it.poster)}" alt="">` : '<div class="poster"></div>'}
       <div class="body">
         <h3>${it.imdbId ? `<a href="https://www.imdb.com/title/${it.imdbId}/" target="_blank" rel="noopener">${esc(it.title)}</a>` : esc(it.title)}</h3>
         <p class="meta">${esc(meta)}</p>
@@ -138,7 +158,7 @@ async function onCard(e) {
     rerender(it);
     refresh();
   } catch (err) {
-    alert(err.message);
+    toast(err.message);
   }
 }
 document.addEventListener('click', onCard);
@@ -296,7 +316,7 @@ async function loadProviders() {
     const list = await api.providers(status.region);
     $('#providers').innerHTML = list.slice(0, 60).map((p) => `<label class="prov" title="${esc(p.name)}">
       <input type="checkbox" value="${p.id}" ${status.services.includes(p.id) ? 'checked' : ''}>
-      ${p.logo ? `<img src="${IMG}/w92${p.logo}" alt="">` : ''}<span>${esc(p.name)}</span></label>`).join('');
+      ${p.logo ? `<img src="${img('w92', p.logo)}" alt="">` : ''}<span>${esc(p.name)}</span></label>`).join('');
     show('#settings-msg', '');
   } catch (e) { show('#settings-msg', e.message, true); }
 }
@@ -380,9 +400,20 @@ $('#restore').addEventListener('change', async (e) => {
   e.target.value = '';
 });
 
+// Two taps to delete, instead of a confirm() dialog.
+let resetArmed;
 $('#reset').addEventListener('click', async () => {
-  if (!confirm('Delete everything you marked and set up on this phone?')) return;
+  const btn = $('#reset');
+  if (!resetArmed) {
+    btn.textContent = 'Tap again to delete everything';
+    resetArmed = setTimeout(() => { resetArmed = null; btn.textContent = 'Delete my data'; }, 4000);
+    return;
+  }
+  clearTimeout(resetArmed);
+  resetArmed = null;
+  btn.textContent = 'Delete my data';
   api.reset();
+  toast('Deleted.');
   refresh();
   await loadProviders();
 });
@@ -398,14 +429,23 @@ function openTab(name) {
 document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.tab)));
 $('#go').addEventListener('click', loadRecs);
 
+if (DEMO) {
+  $('#demo-banner').hidden = false;
+  $('#demo-exit').hidden = !!window.WTW_DEMO; // the preview page has nothing to exit to
+  $('#key-card').hidden = true;
+  $('#backup-card').hidden = true;
+  $('#imdb-card').hidden = true;
+}
+
 refresh();
 loadCategories();
 loadProviders();
 if (!status.hasKey) openTab('setup');
+else if (DEMO) openCategory('true-crime');
 
 // Ask the browser not to clear our storage (Safari otherwise can after a week
 // of not opening the site, unless it's been added to the home screen).
 navigator.storage?.persist?.().catch(() => {});
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
+if ('serviceWorker' in navigator && location.protocol === 'https:' && !window.WTW_DEMO) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
