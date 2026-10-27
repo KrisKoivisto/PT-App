@@ -1,7 +1,6 @@
-// Quick reactions map onto the 1-10 scale IMDb uses, so both kinds of data
-// feed the same recommender. Like sits at the default seed cutoff (8).
-export const REACTIONS = { love: 10, like: 8, dislike: 3 };
+export const REACTIONS = { love: 'Loved it', like: 'Liked it', dislike: 'Not for me' };
 
+// Lists saved by earlier versions stored a 1-10 rating instead of a reaction.
 export const reactionOf = (rating) =>
   rating >= 9 ? 'love' : rating >= 7 ? 'like' : rating && rating <= 5 ? 'dislike' : null;
 

@@ -80,7 +80,7 @@ function tile(it) {
   const where = services(it);
   const badge = m.reaction ? BADGE[m.reaction] : m.want ? 'bookmark' : null;
   const sub = it.role || [it.year, it.type === 'tv' ? 'Series' : 'Film'].filter(Boolean).join(' · ');
-  return `<button class="tile${it.available === false ? ' dim' : ''}" data-key="${keyOf(it)}"${it.role ? ` data-role="${esc(it.role)}"` : ''}${it.available === false ? ' data-dim' : ''}>
+  return `<button class="tile" data-key="${keyOf(it)}"${it.role ? ` data-role="${esc(it.role)}"` : ''}>
     <span class="poster">
       ${it.poster ? `<img loading="lazy" src="${img('w342', it.poster)}" alt="">` : `<span class="noposter">${esc(it.title)}</span>`}
       ${badge ? `<span class="badge b-${m.reaction ?? 'want'}" title="${m.reaction ? 'You rated this' : 'On your watchlist'}">${icon(badge, true)}</span>` : ''}
@@ -94,9 +94,9 @@ function tile(it) {
   </button>`;
 }
 
-// Role (on a person page) and availability (on the watchlist) belong to the
-// view the poster is in, so they're passed along per wall, not stored.
-const inView = (it) => ({ ...items.get(keyOf(it)), role: it.role, available: it.available });
+// The role under a poster belongs to the actor page it's on, so it's passed
+// along per wall, not stored with the title.
+const inView = (it) => ({ ...items.get(keyOf(it)), role: it.role });
 
 function renderWall(sel, list, append = false) {
   for (const it of list) remember(it);
@@ -107,13 +107,13 @@ function renderWall(sel, list, append = false) {
 
 // Keep the latest copy of each title without losing what other views know.
 function remember(it) {
-  const { role, available, ...rest } = it;
+  const { role, ...rest } = it;
   items.set(keyOf(it), { ...items.get(keyOf(it)), ...rest });
 }
 
 function updateTiles(it) {
   document.querySelectorAll(`.tile[data-key="${keyOf(it)}"]`).forEach((el) => {
-    el.outerHTML = tile({ ...it, role: el.dataset.role, available: 'dim' in el.dataset ? false : undefined });
+    el.outerHTML = tile({ ...it, role: el.dataset.role });
   });
 }
 
@@ -144,8 +144,11 @@ function renderSheet(keepScroll = false) {
   if (!stack.length) {
     sheet.hidden = true;
     document.body.classList.remove('locked');
+    if (view === 'list' && !sheet.dataset.closed) loadList(); // a title may have moved lists
+    sheet.dataset.closed = '1';
     return;
   }
+  delete sheet.dataset.closed;
   const top = stack.at(-1);
   const scroll = panel.scrollTop;
   sheet.hidden = false;
@@ -322,7 +325,7 @@ $('#sheet-close').addEventListener('click', () => closeSheet());
 $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') closeSheet(true); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && stack.length) closeSheet(); });
 
-// --- browse & search ------------------------------------------------------------
+// --- find: search and categories -----------------------------------------------
 const browseState = { category: null, sub: null, page: 1, totalPages: 0 };
 let categories = [];
 let trueCrimeSubs = [];
@@ -360,23 +363,23 @@ async function loadBrowse(append = false) {
   const sub = trueCrimeSubs.find((s) => s.key === browseState.sub)?.name;
   $('#browse-title').hidden = false;
   $('#browse-title').textContent = sub ? `${cat} · ${sub}` : cat;
+  $('#mine-toggle').hidden = !status.services.length;
   show('#browse-msg', 'Loading…');
   try {
     const r = await api.browse({
       category: browseState.category, sub: browseState.sub, page: browseState.page,
-      type: $('#b-type').value, sort: $('#b-sort').value,
-      onlyMine: $('#b-mine').checked, hideRated: $('#b-hide').checked,
+      onlyMine: $('#b-mine').checked,
     });
     browseState.totalPages = r.totalPages;
     renderWall('#browse-grid', r.items, append);
-    show('#browse-msg', $('#browse-grid').children.length ? legend() : 'Nothing here with these filters.');
+    show('#browse-msg', $('#browse-grid').children.length ? legend() : 'Nothing here yet. Try another category.');
     $('#more').hidden = browseState.page >= browseState.totalPages;
   } catch (e) { show('#browse-msg', e.message, true); }
 }
 
 const legend = () => (status.services.length
   ? 'Green ring = a service you have. Tap a poster for cast and every way to watch.'
-  : 'Tap a poster for cast and where to watch. Tick your services in Setup to see which you already have.');
+  : 'Tap a poster for cast and where to watch. Add your services in Settings to see which you already have.');
 
 async function runSearch(q) {
   browseState.category = null;
@@ -428,55 +431,47 @@ $('#search-form').addEventListener('submit', (e) => {
   $('#q').blur(); // drop the phone keyboard so results are visible
   runSearch(q);
 });
-for (const id of ['#b-type', '#b-sort', '#b-mine', '#b-hide']) {
-  $(id).addEventListener('change', () => browseState.category && loadBrowse());
-}
+$('#b-mine').addEventListener('change', () => loadBrowse());
 $('#more').addEventListener('click', () => { browseState.page++; loadBrowse(true); });
 
-// --- for you / watchlist / seen -----------------------------------------------
-async function loadRecs() {
-  $('#foryou-grid').innerHTML = '';
-  show('#foryou-msg', 'Working. The first run can take a minute.');
-  try {
-    const r = await api.recommendations({ type: $('#type').value, genre: $('#genre').value.trim() || null });
-    if (r.reason === 'no-seeds') return show('#foryou-msg', 'Mark a few titles as Loved it or Liked it first. Tap any poster in Search to do that.');
-    if (!r.items.length) return show('#foryou-msg', status.services.length ? 'Nothing matched your services. Try another filter, or count rent/buy in Setup.' : 'No results.');
-    show('#foryou-msg', status.services.length ? "Only showing what's on your services." : 'Not filtered by service yet. Tick yours in Setup.');
-    renderWall('#foryou-grid', r.items);
-  } catch (e) { show('#foryou-msg', e.message, true); }
+// --- my list ----------------------------------------------------------------------
+const LIST_TABS = { want: 'Watchlist', love: 'Loved', like: 'Liked', dislike: 'Not for me' };
+const LIST_EMPTY = {
+  want: 'Nothing on your watchlist yet. Open any poster and tap Watchlist.',
+  love: "Nothing here yet. Open a poster you've seen and tap Loved it.",
+  like: "Nothing here yet. Open a poster you've seen and tap Liked it.",
+  dislike: 'Nothing here yet.',
+};
+let listShow = 'want';
+
+function renderListTabs() {
+  $('#list-tabs').innerHTML = Object.entries(LIST_TABS)
+    .map(([k, l]) => `<button data-show="${k}" class="${k === listShow ? 'on' : ''}">${l} <span class="count">${status.counts[k]}</span></button>`).join('');
 }
 
-async function loadWatchlist() {
-  $('#watchlist-grid').innerHTML = '';
-  show('#watchlist-msg', 'Checking…');
+async function loadList() {
+  renderListTabs();
+  if (!$('#list-grid').children.length) show('#list-msg', 'Loading…');
   try {
-    const { items: list } = await api.watchlist();
-    if (!list.length) return show('#watchlist-msg', 'Nothing here yet. Tap a poster, then Watchlist.');
-    const ready = list.filter((i) => i.available);
-    show('#watchlist-msg', `${ready.length} of ${list.length} streaming now${status.services.length ? ' on your services' : ''}. Faded ones aren't.`);
-    renderWall('#watchlist-grid', list);
-  } catch (e) { show('#watchlist-msg', e.message, true); }
+    const { items: list } = await api.list(listShow);
+    renderWall('#list-grid', list);
+    if (!list.length) return show('#list-msg', LIST_EMPTY[listShow]);
+    const streaming = list.filter((i) => i.services.length).length;
+    show('#list-msg', listShow === 'want' && status.services.length
+      ? `${streaming} of ${list.length} streaming on your services now.`
+      : '');
+  } catch (e) { show('#list-msg', e.message, true); }
 }
-
-let mineShow = 'love';
-async function loadMine() {
-  $('#mine-grid').innerHTML = '';
-  show('#mine-msg', 'Loading…');
-  try {
-    const r = await api.titles(mineShow);
-    const labels = { love: 'Loved', like: 'Liked', dislike: 'Not for me', want: 'Watchlist' };
-    $('#mine-tabs').innerHTML = Object.entries(labels)
-      .map(([k, l]) => `<button data-show="${k}" class="${k === mineShow ? 'on' : ''}">${l} <span class="count">${r.counts[k]}</span></button>`).join('');
-    show('#mine-msg', r.items.length ? '' : 'Nothing here yet. Tap any poster to mark it.');
-    renderWall('#mine-grid', r.items);
-  } catch (e) { show('#mine-msg', e.message, true); }
-}
-$('#mine-tabs').addEventListener('click', (e) => {
+$('#list-tabs').addEventListener('click', (e) => {
   const b = e.target.closest('[data-show]');
-  if (b) { mineShow = b.dataset.show; loadMine(); }
+  if (b && b.dataset.show !== listShow) {
+    listShow = b.dataset.show;
+    $('#list-grid').innerHTML = '';
+    loadList();
+  }
 });
 
-// --- setup ----------------------------------------------------------------------
+// --- settings ---------------------------------------------------------------------
 async function loadProviders() {
   if (!status.hasKey) { $('#providers').innerHTML = ''; return; }
   try {
@@ -488,23 +483,12 @@ async function loadProviders() {
   } catch (e) { show('#settings-msg', e.message, true); }
 }
 
-function saveSettings() {
-  const svc = [...document.querySelectorAll('#providers input:checked')].map((i) => Number(i.value));
-  api.settings({ services: svc, includeRentBuy: $('#rentbuy').checked, minSeedRating: Number($('#minseed').value) });
-  refresh();
-}
-
 function renderStatus() {
   $('#region').innerHTML = Object.entries(REGIONS).map(([c, n]) => `<option value="${c}" ${c === status.region ? 'selected' : ''}>${n}</option>`).join('');
-  $('#rentbuy').checked = status.includeRentBuy;
-  $('#minseed').innerHTML = [10, 9, 8, 7, 6].map((n) => `<option ${n === status.minSeedRating ? 'selected' : ''}>${n}</option>`).join('');
-  $('#taste').textContent = status.ratings
-    ? `${status.ratings} rated and ${status.watchlist} on your watchlist.${status.topGenres.length ? ' You rate these highest: ' + status.topGenres.join(', ') + '.' : ''}`
-    : 'Nothing marked yet.';
-  $('#genres').innerHTML = status.topGenres.map((g) => `<option value="${esc(g)}">`).join('');
-  $('#b-mine').disabled = !status.services.length;
-  if (!status.services.length) $('#b-mine').checked = false;
   $('#key-state').textContent = status.hasKey ? 'Key saved on this phone. ✓' : '';
+  const total = status.counts.want + status.counts.love + status.counts.like + status.counts.dislike;
+  $('#list-count').textContent = total || '';
+  if (!status.services.length) $('#b-mine').checked = false;
 }
 
 function refresh() {
@@ -518,7 +502,7 @@ $('#key-form').addEventListener('submit', async (e) => {
   try {
     await api.setKey($('#key').value);
     $('#key').value = '';
-    show('#key-msg', 'That works.');
+    show('#key-msg', 'That works. Now tick your streaming services below.');
     refresh();
     await loadProviders();
   } catch (err) {
@@ -526,25 +510,16 @@ $('#key-form').addEventListener('submit', async (e) => {
   }
 });
 
-$('#rentbuy').addEventListener('change', saveSettings);
-$('#minseed').addEventListener('change', saveSettings);
-$('#providers').addEventListener('change', saveSettings);
+$('#providers').addEventListener('change', () => {
+  const svc = [...document.querySelectorAll('#providers input:checked')].map((i) => Number(i.value));
+  api.settings({ services: svc });
+  refresh();
+});
 $('#region').addEventListener('change', async () => {
   api.settings({ region: $('#region').value, services: [] });
   refresh();
   await loadProviders();
 });
-
-document.querySelectorAll('[data-import]').forEach((input) => input.addEventListener('change', async () => {
-  const file = input.files[0];
-  if (!file) return;
-  try {
-    const r = api.importCsv(await file.text());
-    show('#import-msg', `Imported ${r.count} ${r.kind === 'ratings' ? 'rated titles' : 'watchlist titles'}.`);
-    refresh();
-  } catch (e) { show('#import-msg', e.message, true); }
-  input.value = '';
-}));
 
 $('#backup').addEventListener('click', () => {
   const blob = new Blob([api.exportData()], { type: 'application/json' });
@@ -559,7 +534,7 @@ $('#restore').addEventListener('change', async (e) => {
   if (!file) return;
   try {
     const r = api.importData(await file.text());
-    show('#backup-msg', `Restored ${r.ratings} rated and ${r.watchlist} watchlist titles.`);
+    show('#backup-msg', `Restored ${r.ratings} seen and ${r.watchlist} watchlist titles.`);
     refresh();
     await loadProviders();
   } catch (err) { show('#backup-msg', err.message, true); }
@@ -568,44 +543,51 @@ $('#restore').addEventListener('change', async (e) => {
 
 // Two taps to delete, instead of a confirm() dialog.
 let resetArmed;
-$('#reset').addEventListener('click', async () => {
+$('#reset').addEventListener('click', () => {
   const btn = $('#reset');
   if (!resetArmed) {
-    btn.textContent = 'Tap again to delete everything';
-    resetArmed = setTimeout(() => { resetArmed = null; btn.textContent = 'Delete my data'; }, 4000);
+    btn.textContent = 'Tap again to delete your whole list';
+    resetArmed = setTimeout(() => { resetArmed = null; btn.textContent = 'Delete my list'; }, 4000);
     return;
   }
   clearTimeout(resetArmed);
   resetArmed = null;
-  btn.textContent = 'Delete my data';
+  btn.textContent = 'Delete my list';
+  const keep = { region: status.region, services: status.services };
   api.reset();
-  toast('Deleted.');
+  api.settings(keep); // the list goes; your country and services stay
+  toast('Your list is deleted.');
   refresh();
-  await loadProviders();
 });
 
-// --- tabs -------------------------------------------------------------------------
-function openTab(name) {
-  document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('on', x.dataset.tab === name));
+// --- views: Find, My list, Settings ------------------------------------------------
+let view = 'find';
+function openView(name) {
+  view = name;
+  document.querySelectorAll('.switch button').forEach((x) => x.classList.toggle('on', x.dataset.view === name));
   document.querySelectorAll('main > section').forEach((s) => (s.hidden = s.id !== name));
-  if (name === 'watchlist') loadWatchlist();
-  if (name === 'mine') loadMine();
+  $('#open-settings').classList.toggle('on', name === 'settings');
+  if (name === 'list') loadList();
   window.scrollTo(0, 0);
 }
-document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.tab)));
-$('#go').addEventListener('click', loadRecs);
+document.querySelectorAll('.switch button').forEach((b) => b.addEventListener('click', () => openView(b.dataset.view)));
+$('#open-settings').addEventListener('click', () => openView(view === 'settings' ? 'find' : 'settings'));
+$('#close-settings').addEventListener('click', () => {
+  openView('find');
+  if (browseState.category) loadBrowse(); // services may have changed
+});
 
 if (DEMO) {
   $('#demo-banner').hidden = false;
   $('#demo-exit').hidden = !!window.WTW_DEMO; // the preview page has nothing to exit to
-  for (const id of ['#key-card', '#backup-card', '#imdb-card']) $(id).hidden = true;
+  for (const id of ['#key-card', '#backup-card']) $(id).hidden = true;
 }
 
 refresh();
 loadCategories();
 loadProviders();
-if (!status.hasKey) openTab('setup');
-else if (DEMO) openCategory('true-crime');
+if (!status.hasKey) openView('settings');
+else openCategory('true-crime');
 
 // Ask the browser not to clear our storage (Safari otherwise can after a week
 // of not opening the site, unless it's been added to the home screen).

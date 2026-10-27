@@ -168,16 +168,6 @@ function search(query) {
   return { results: [...hits.sort((a, b) => b.pop - a.pop).map(brief), ...people] };
 }
 
-function recommendations(t) {
-  const anchors = new Set([33722, 9672]);
-  const mine = t.kw.filter((k) => !anchors.has(k));
-  const scored = TITLES.filter((o) => o !== t).map((o) => ({
-    o,
-    s: o.kw.filter((k) => mine.includes(k)).length * 3 + o.genres.filter((g) => t.genres.includes(g)).length,
-  })).filter((x) => x.s > 0);
-  return { results: scored.sort((a, b) => b.s - a.s || b.o.pop - a.o.pop).map((x) => brief(x.o)) };
-}
-
 function route(url) {
   const path = url.pathname.replace(/^\/3/, '');
   const q = url.searchParams;
@@ -200,10 +190,9 @@ function route(url) {
     const p = person.get(Number(pm[1]));
     return p && { id: p.id, name: p.name, profile_path: p.profile, known_for_department: p.dept, combined_credits: { cast: filmography(p) } };
   }
-  const m = path.match(/^\/(movie|tv)\/(\d+)(\/recommendations|\/credits|\/aggregate_credits)?$/);
+  const m = path.match(/^\/(movie|tv)\/(\d+)(\/credits|\/aggregate_credits)?$/);
   const t = m && byId.get(`${m[1]}:${m[2]}`);
   if (!t) return null;
-  if (m[3] === '/recommendations') return recommendations(t);
   if (m[3]) {
     return {
       cast: t.cast.map(([id, character]) => {

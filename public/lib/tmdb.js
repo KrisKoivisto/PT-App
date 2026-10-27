@@ -35,15 +35,6 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
   }
 
   return {
-    // imdb id -> { id, type } or null
-    async find(imdbId, type) {
-      const r = await get(`/find/${imdbId}`, { external_source: 'imdb_id' });
-      const movie = r?.movie_results?.[0];
-      const tv = r?.tv_results?.[0];
-      const [hit, kind] = type === 'tv' ? (tv ? [tv, 'tv'] : [movie, 'movie']) : (movie ? [movie, 'movie'] : [tv, 'tv']);
-      return hit ? { id: hit.id, type: kind } : null;
-    },
-
     // Titles first, then the best-known work of any people that match
     // (search "Ted Bundy" or an actor and you get what they're in). People
     // come back separately too, so they can be shown with their photos.
@@ -110,8 +101,6 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
       const r = await get(`/genre/${type}/list`);
       return r?.genres ?? [];
     },
-
-    recommendations: (type, id) => get(`/${type}/${id}/recommendations`),
 
     // details + providers + imdb id in one request
     details: (type, id) =>

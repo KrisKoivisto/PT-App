@@ -1,5 +1,5 @@
 import { pool } from './tmdb.js';
-import { shape, matchServices, seenSet, isSeen } from './recommend.js';
+import { shape, matchServices, seenSet, isSeen } from './titles.js';
 
 // Keyword ids below were checked on themoviedb.org/search/keyword.
 const KW = { trueCrime: 33722, trueStory: 9672 };
@@ -48,7 +48,6 @@ export const TRUE_CRIME_SUBS = [
 ];
 
 const CONCURRENCY = 8;
-const today = () => new Date().toISOString().slice(0, 10);
 
 // Discover param sets for one media type. Several sets get merged, which is
 // how a true crime subcategory works: TMDB can AND or OR keywords but not
@@ -70,50 +69,35 @@ async function querySets(tmdb, cat, sub, type) {
   return ids.length ? [{ with_genres: ids.join('|') }] : [];
 }
 
-const SORTS = {
-  popular: { movie: { sort_by: 'popularity.desc' }, tv: { sort_by: 'popularity.desc' }, field: (r) => r.popularity },
-  top: {
-    movie: { sort_by: 'vote_average.desc', 'vote_count.gte': 300 },
-    tv: { sort_by: 'vote_average.desc', 'vote_count.gte': 150 },
-    field: (r) => r.vote_average,
-  },
-  new: {
-    movie: () => ({ sort_by: 'primary_release_date.desc', 'primary_release_date.lte': today(), 'vote_count.gte': 10 }),
-    tv: () => ({ sort_by: 'first_air_date.desc', 'first_air_date.lte': today(), 'vote_count.gte': 10 }),
-    field: (r) => Date.parse(r.release_date ?? r.first_air_date ?? 0) || 0,
-  },
-};
-
 // Turn bare TMDB ids into full items with where-to-watch.
 export async function detail(tmdb, profile, list) {
   const rows = await pool(list, CONCURRENCY, async ({ type, id }) => {
     const d = await tmdb.details(type, id);
     if (!d) return null;
     const item = shape(type, d, profile.region);
-    return { ...item, services: matchServices(item, new Set(profile.services), profile.includeRentBuy) };
+    return { ...item, services: matchServices(item, new Set(profile.services)) };
   });
   return rows.filter(Boolean);
 }
 
-export async function browse(tmdb, profile, { category, sub = null, type = 'all', sort = 'popular', page = 1, onlyMine = false, hideRated = true }) {
+export async function browse(tmdb, profile, { category, sub = null, page = 1, onlyMine = false }) {
   const cat = CATEGORIES.find((c) => c.key === category);
   if (!cat) throw Object.assign(new Error('Unknown category.'), { status: 400 });
   const subcat = sub && category === 'true-crime' ? TRUE_CRIME_SUBS.find((s) => s.key === sub) : null;
   if (sub && !subcat) throw Object.assign(new Error('Unknown subcategory.'), { status: 400 });
-  const s = SORTS[sort] ?? SORTS.popular;
-  const types = type === 'all' ? ['movie', 'tv'] : [type];
 
   const where = {};
   if (onlyMine && profile.services.length) {
     where.watch_region = profile.region;
     where.with_watch_providers = profile.services.join('|');
-    where.with_watch_monetization_types = profile.includeRentBuy ? 'flatrate|free|ads|rent|buy' : 'flatrate|free|ads';
+    where.with_watch_monetization_types = 'flatrate|free|ads';
   }
 
   const calls = [];
-  for (const t of types) {
-    const sortParams = typeof s[t] === 'function' ? s[t]() : s[t];
-    for (const params of await querySets(tmdb, cat, subcat, t)) calls.push({ t, params: { ...params, ...sortParams, ...where, page } });
+  for (const t of ['movie', 'tv']) {
+    for (const params of await querySets(tmdb, cat, subcat, t)) {
+      calls.push({ t, params: { ...params, sort_by: 'popularity.desc', ...where, page } });
+    }
   }
 
   let totalPages = 0;
@@ -121,16 +105,13 @@ export async function browse(tmdb, profile, { category, sub = null, type = 'all'
   await pool(calls, CONCURRENCY, async ({ t, params }) => {
     const r = await tmdb.discover(t, params);
     totalPages = Math.max(totalPages, Math.min(r?.total_pages ?? 0, 500));
-    for (const x of r?.results ?? []) byKey.set(`${t}:${x.id}`, { type: t, id: x.id, rank: s.field(x) });
+    for (const x of r?.results ?? []) byKey.set(`${t}:${x.id}`, { type: t, id: x.id, rank: x.popularity ?? 0 });
   });
 
-  // Mix movies and shows by the chosen sort.
+  // Movies and shows mixed, most popular first, minus what you've seen.
   const found = [...byKey.values()].sort((a, b) => b.rank - a.rank);
-  let items = await detail(tmdb, profile, found);
-  if (hideRated) {
-    const seen = seenSet(profile.ratings);
-    items = items.filter((i) => !isSeen(seen, i));
-  }
+  const seen = seenSet(profile.ratings);
+  const items = (await detail(tmdb, profile, found)).filter((i) => !isSeen(seen, i));
   return { items, page, totalPages, category: cat.name, sub: subcat?.name ?? null };
 }
 

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>What to Watch</title>
-<meta name="description" content="Find where a movie or show is streaming, and keep your own watched list.">
+<meta name="description" content="Find where a movie or show is streaming, and keep your own list of what you've seen.">
 <meta name="theme-color" content="#0d0f13">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -20,23 +20,24 @@
 </head>
 <body>
 <header>
-  <h1 class="wordmark">What to Watch</h1>
+  <div class="topbar">
+    <h1 class="wordmark">What to Watch</h1>
+    <button id="open-settings" class="icon-btn" aria-label="Settings">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+    </button>
+  </div>
   <p id="demo-banner" class="banner" hidden>
-    Sample mode: the titles and people are made up. The real app looks up every movie, show and actor live.
+    Sample mode: the titles and people are made up. The real app looks everything up live.
     <a id="demo-exit" href="./">Use the real app</a>
   </p>
+  <div class="switch" role="tablist">
+    <button data-view="find" class="on" role="tab">Find</button>
+    <button data-view="list" role="tab">My list <span id="list-count" class="count"></span></button>
+  </div>
 </header>
 
-<nav>
-  <button data-tab="browse" class="on"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Search</button>
-  <button data-tab="foryou"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6-4.5-4.2 6.1-.7z"/></svg>For you</button>
-  <button data-tab="watchlist"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>Watchlist</button>
-  <button data-tab="mine"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>Seen</button>
-  <button data-tab="setup"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>Setup</button>
-</nav>
-
 <main>
-  <section id="browse">
+  <section id="find">
     <form id="search-form" class="searchbar" role="search">
       <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="q" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off"
@@ -62,60 +63,30 @@
     </div>
 
     <div id="browse-results">
-      <div class="filters">
-        <select id="b-type" aria-label="Movies or shows">
-          <option value="all">Movies &amp; shows</option>
-          <option value="movie">Movies</option>
-          <option value="tv">Shows</option>
-        </select>
-        <select id="b-sort" aria-label="Sort">
-          <option value="popular">Popular</option>
-          <option value="top">Top rated</option>
-          <option value="new">Newest</option>
-        </select>
-        <label class="check"><input type="checkbox" id="b-mine"> My services</label>
-        <label class="check"><input type="checkbox" id="b-hide" checked> Hide seen</label>
+      <div class="shelf-row">
+        <h2 id="browse-title" class="shelf" hidden></h2>
+        <label id="mine-toggle" class="check" hidden><input type="checkbox" id="b-mine"> Only my services</label>
       </div>
-      <h2 id="browse-title" class="shelf" hidden></h2>
       <div id="browse-grid" class="wall"></div>
-      <p id="browse-msg" class="msg">Search, or pick a category.</p>
+      <p id="browse-msg" class="msg">Search for anything, or pick a category.</p>
       <button id="more" class="more" hidden>Show more</button>
     </div>
   </section>
 
-  <section id="foryou" hidden>
-    <h2 class="shelf">For you</h2>
-    <div class="filters">
-      <select id="type" aria-label="Movies or shows">
-        <option value="all">Movies &amp; shows</option>
-        <option value="movie">Movies</option>
-        <option value="tv">Shows</option>
-      </select>
-      <input id="genre" placeholder="Genre (optional)" list="genres" aria-label="Genre">
-      <datalist id="genres"></datalist>
-      <button id="go" class="primary">Find something</button>
+  <section id="list" hidden>
+    <div id="list-tabs" class="chips scroll"></div>
+    <div id="list-grid" class="wall"></div>
+    <p id="list-msg" class="msg"></p>
+  </section>
+
+  <section id="settings" hidden>
+    <div class="shelf-row">
+      <h2 class="shelf">Settings</h2>
+      <button id="close-settings" class="link-btn">Done</button>
     </div>
-    <p id="foryou-msg" class="msg">Picked from what you loved and liked. Things that weren't for you push similar titles down.</p>
-    <div id="foryou-grid" class="wall"></div>
-  </section>
 
-  <section id="watchlist" hidden>
-    <h2 class="shelf">Watchlist</h2>
-    <p id="watchlist-msg" class="msg"></p>
-    <div id="watchlist-grid" class="wall"></div>
-  </section>
-
-  <section id="mine" hidden>
-    <h2 class="shelf">Seen it</h2>
-    <div id="mine-tabs" class="chips scroll"></div>
-    <p id="mine-msg" class="msg"></p>
-    <div id="mine-grid" class="wall"></div>
-  </section>
-
-  <section id="setup" hidden>
-    <h2 class="shelf">Setup</h2>
     <div class="card" id="key-card">
-      <h3>1. Your free TMDB key</h3>
+      <h3>Your free TMDB key</h3>
       <p>TMDB is the free movie database this app looks everything up in. It needs a key once.</p>
       <ol class="steps">
         <li>Make a free account at <a href="https://www.themoviedb.org/signup" target="_blank" rel="noopener">themoviedb.org</a>.</li>
@@ -132,53 +103,34 @@
     </div>
 
     <div class="card">
-      <h3>2. Your streaming services</h3>
+      <h3>Your streaming services</h3>
       <p>Tick what you pay for. Those get a green ring on every poster.</p>
       <label class="row">Country <select id="region"></select></label>
-      <label class="check"><input type="checkbox" id="rentbuy"> Count rent/buy as available</label>
       <div id="providers" class="providers"></div>
       <p id="settings-msg" class="msg"></p>
     </div>
 
     <div class="card">
-      <h3>3. Put it on your home screen</h3>
-      <p><b>iPhone:</b> open this page in Safari, tap Share, then <b>Add to Home Screen</b>.<br>
-        <b>Android:</b> in Chrome, tap ⋮, then <b>Add to Home screen</b> or <b>Install app</b>.</p>
-      <p class="msg">It then opens like an app. On iPhone this also stops Safari from clearing your list if you go a while without opening it.</p>
+      <h3>Put it on your home screen</h3>
+      <p><b>iPhone:</b> in Safari, tap Share, then <b>Add to Home Screen</b>.<br>
+        <b>Android:</b> in Chrome, tap ⋮, then <b>Add to Home screen</b>.</p>
+      <p class="msg">On iPhone this also stops Safari from clearing your list if you go a while without opening it.</p>
     </div>
 
     <div class="card" id="backup-card">
       <h3>Backup</h3>
-      <p>Your list lives on this phone only. Save a backup now and then, or to move it to another device.</p>
+      <p>Your list lives on this phone only. Save a backup now and then, or to move it to another phone.</p>
       <div class="row">
         <button id="backup">Save backup</button>
-        <label class="file">Restore from backup <input type="file" id="restore" accept=".json,application/json"></label>
+        <label class="file">Restore <input type="file" id="restore" accept=".json,application/json"></label>
       </div>
       <p id="backup-msg" class="msg"></p>
-    </div>
-
-    <div class="card" id="imdb-card">
-      <h3>Import from IMDb (optional)</h3>
-      <p>On IMDb, open Your Ratings (or your Watchlist), tap the three dots, choose Export, and pick the file here.</p>
-      <div class="row">
-        <label class="file">Ratings CSV <input type="file" accept=".csv" data-import></label>
-        <label class="file">Watchlist CSV <input type="file" accept=".csv" data-import></label>
-      </div>
-      <p id="import-msg" class="msg"></p>
-    </div>
-
-    <div class="card">
-      <h3>Taste</h3>
-      <label class="row">Recommend from titles rated at least <select id="minseed"></select></label>
-      <p class="msg">Loved counts as 10, Liked as 8, Not for me as 3.</p>
-      <p id="taste" class="msg"></p>
-      <button id="reset" class="danger">Delete my data</button>
+      <button id="reset" class="danger">Delete my list</button>
     </div>
 
     <p class="credits">
       Streaming availability data from JustWatch via TMDB.
       This product uses the TMDB API but is not endorsed or certified by TMDB.
-      Not affiliated with IMDb.
     </p>
   </section>
 </main>

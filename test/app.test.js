@@ -1,98 +1,65 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { parseCsv } from '../public/lib/csv.js';
-import { parseImdbCsv } from '../public/lib/imdb.js';
 import { createApi, browserStore } from '../public/lib/api.js';
 import { matchCategories } from '../public/lib/browse.js';
-import { createServer } from '../server.js';
 import { demoFetch } from '../public/lib/demo.js';
 import { reasonsFor, kindOf } from '../public/lib/reasons.js';
+import { createServer } from '../server.js';
 
-const RATINGS = `Const,Your Rating,Date Rated,Title,Original Title,URL,Title Type,IMDb Rating,Runtime (mins),Year,Genres,Num Votes,Release Date,Directors
-tt0000001,10,2024-01-01,"Seed, The Movie",,https://x,movie,8.0,100,2000,"Drama, Sci-Fi",1000,2000-01-01,A
-tt0000002,9,2024-01-02,Seed Show,,https://x,tvSeries,8.0,50,2010,"Drama, Crime",1000,2010-01-01,
-tt0000003,3,2024-01-03,Bad One,,https://x,movie,4.0,90,2005,Comedy,1000,2005-01-01,B
-tt0000004,8,2024-01-04,An Episode,,https://x,tvEpisode,8.0,50,2011,Drama,1000,2011-01-01,
-`;
-const WATCHLIST = `Position,Const,Created,Modified,Description,Title,URL,Title Type,IMDb Rating,Runtime (mins),Year,Genres,Num Votes,Release Date,Directors
-1,tt0000010,2024-01-01,2024-01-01,,On Netflix,https://x,movie,7.0,100,2020,Drama,100,2020-01-01,A
-2,tt0000011,2024-01-01,2024-01-01,,Nowhere,https://x,movie,7.0,100,2021,Drama,100,2021-01-01,A
-`;
-
-test('csv handles quotes, CRLF and BOM', () => {
-  const rows = parseCsv('﻿a,b\r\n"x, ""y""",2\r\n');
-  assert.deepEqual(rows, [['a', 'b'], ['x, "y"', '2']]);
-});
-
-test('imdb ratings parse: skips episodes, detects kind', () => {
-  const { kind, items } = parseImdbCsv(RATINGS);
-  assert.equal(kind, 'ratings');
-  assert.equal(items.length, 3);
-  assert.equal(items[0].title, 'Seed, The Movie');
-  assert.deepEqual(items[0].genres, ['Drama', 'Sci-Fi']);
-  assert.equal(items[1].type, 'tv');
-  assert.equal(parseImdbCsv(WATCHLIST).kind, 'watchlist');
-  assert.throws(() => parseImdbCsv('a,b\n1,2'), /IMDb export/);
-});
-
-// --- mock TMDB -------------------------------------------------------------
+// --- fake TMDB ------------------------------------------------------------------
 const NETFLIX = { provider_id: 8, provider_name: 'Netflix', logo_path: '/n.jpg' };
 const HULU = { provider_id: 15, provider_name: 'Hulu', logo_path: '/h.jpg' };
 const detail = (id, name, imdb, flatrate, extra = {}) => ({
-  id, title: name, name, release_date: '2020-05-01', overview: 'o', genres: [{ name: 'Drama' }],
-  runtime: 100, vote_average: 8, vote_count: 500, external_ids: { imdb_id: imdb },
-  'watch/providers': { results: { US: { flatrate } } }, ...extra,
+  id, title: name, name, release_date: '2020-05-01', overview: 'o', genres: [{ name: 'Documentary' }, { name: 'Crime' }],
+  runtime: 100, vote_average: 8, vote_count: 500, poster_path: `/p${id}.jpg`, backdrop_path: `/b${id}.jpg`,
+  external_ids: { imdb_id: imdb },
+  'watch/providers': { results: { US: { flatrate, rent: [HULU], link: 'https://tmdb/watch' } } }, ...extra,
 });
 const DB = {
-  '/find/tt0000001': { movie_results: [{ id: 1, media_type: 'movie' }], tv_results: [] },
-  '/find/tt0000002': { movie_results: [], tv_results: [{ id: 2, media_type: 'tv' }] },
-  '/find/tt0000010': { movie_results: [{ id: 10, media_type: 'movie' }], tv_results: [] },
-  '/find/tt0000011': { movie_results: [{ id: 11, media_type: 'movie' }], tv_results: [] },
-  '/movie/1/recommendations': { results: [{ id: 20 }, { id: 21 }, { id: 1 }] },
-  '/tv/2/recommendations': { results: [{ id: 20, media_type: 'movie' }, { id: 30, media_type: 'tv' }] },
-  '/movie/1': detail(1, 'Seed, The Movie', 'tt0000001', [HULU]),
-  '/movie/20': detail(20, 'Both Seeds Like Me', 'tt0000020', [NETFLIX]),
-  '/movie/21': detail(21, 'On Hulu Only', 'tt0000021', [HULU]),
-  '/tv/30': detail(30, 'Show Rec', 'tt0000030', [NETFLIX], { number_of_seasons: 3, runtime: undefined }),
-  '/movie/10': detail(10, 'On Netflix', 'tt0000010', [NETFLIX]),
-  '/movie/11': detail(11, 'Nowhere', 'tt0000011', []),
   '/configuration': (u) => (u.searchParams.get('api_key') === 'bad' ? 401 : { images: {} }),
+  '/movie/1': detail(1, 'Vault Job', 'tt1', [NETFLIX]),
+  '/movie/2': detail(2, 'Con Man', 'tt2', [HULU]),
+  '/tv/3': detail(3, 'Cold Trail', 'tt3', [NETFLIX], { number_of_seasons: 2, runtime: undefined }),
+  '/movie/4': detail(4, 'Nowhere Doc', 'tt4', []),
+  '/movie/1/credits': { cast: [{ id: 90, name: 'Ann Lee', character: 'Self', profile_path: '/a.jpg' }, ...Array.from({ length: 30 }, (_, i) => ({ id: 100 + i, name: `Extra ${i}`, character: '' }))] },
+  '/tv/3/aggregate_credits': { cast: [{ id: 91, name: 'Bo Ray', roles: [{ character: 'Host' }], profile_path: null }] },
+  '/person/90': { id: 90, name: 'Ann Lee', profile_path: '/a.jpg', known_for_department: 'Acting', combined_credits: { cast: [
+    { id: 1, media_type: 'movie', character: 'Self', popularity: 5 },
+    { id: 3, media_type: 'tv', character: 'Guest', popularity: 9 },
+    { id: 77, media_type: 'tv', character: 'Herself', popularity: 50, genre_ids: [10767] }, // talk show: dropped
+    { id: 1, media_type: 'movie', character: 'dup', popularity: 1 },
+  ] } },
+  '/search/multi': (u) => ({ results: u.searchParams.get('query') === 'ann lee'
+    ? [{ id: 90, media_type: 'person', name: 'Ann Lee', profile_path: '/a.jpg', known_for_department: 'Acting', known_for: [{ id: 1, media_type: 'movie' }] }]
+    : [{ id: 1, media_type: 'movie' }, { id: 3, media_type: 'tv' }] }),
   '/search/keyword': (u) => ({ results: {
     nurse: [{ id: 500, name: 'nurse' }, { id: 502, name: 'nursery' }],
     killed: [{ id: 9, name: 'killer' }],
-    patients: [{ id: 501, name: 'patient' }],
+    patient: [{ id: 501, name: 'patient' }],
   }[u.searchParams.get('query')] ?? [] }),
-  '/search/multi': (u) => (u.searchParams.get('query') === 'some actor' ? { results: [
-    { id: 99, media_type: 'person', name: 'Some Actor', known_for: [{ id: 21, media_type: 'movie' }, { id: 30, media_type: 'tv' }] },
-  ] } : { results: [
-    { id: 40, media_type: 'movie', title: 'Hand Picked', release_date: '2019-02-02', poster_path: '/p.jpg' },
-    { id: 99, media_type: 'person', name: 'Some Actor' },
-    { id: 41, media_type: 'tv', name: 'Hand Show', first_air_date: '2018-01-01' },
-  ] }),
-  '/movie/40': detail(40, 'Hand Picked', 'tt0000040', [], { genres: [{ name: 'Science Fiction' }] }),
-  '/movie/40/recommendations': { results: [{ id: 21 }, { id: 40 }] },
-  '/tv/41': detail(41, 'Hand Show', null, [NETFLIX]),
   '/genre/movie/list': { genres: [{ id: 80, name: 'Crime' }, { id: 53, name: 'Thriller' }, { id: 9648, name: 'Mystery' }] },
   '/genre/tv/list': { genres: [{ id: 80, name: 'Crime' }, { id: 9648, name: 'Mystery' }] },
   '/discover/movie': (u) => (u.searchParams.get('with_keywords') === '500,501'
-    ? { total_pages: 1, results: [{ id: 21, popularity: 5 }] }
-    : { total_pages: 3, results: [{ id: 21, popularity: 50 }, { id: 1, popularity: 10 }] }),
+    ? { total_pages: 1, results: [{ id: 2, popularity: 5 }] }
+    : { total_pages: 3, results: [{ id: 1, popularity: 50 }, { id: 2, popularity: 10 }] }),
   '/discover/tv': (u) => (u.searchParams.get('with_keywords') === '500,501'
     ? { total_pages: 0, results: [] }
-    : { total_pages: 1, results: [{ id: 30, popularity: 80 }] }),
-  '/watch/providers/movie': { results: [{ provider_id: 8, provider_name: 'Netflix', logo_path: '/n.jpg', display_priorities: { US: 1 } }] },
-  '/watch/providers/tv': { results: [{ provider_id: 15, provider_name: 'Hulu', logo_path: '/h.jpg', display_priorities: { US: 2 } }] },
+    : { total_pages: 1, results: [{ id: 3, popularity: 80 }] }),
+  '/watch/providers/movie': { results: [{ ...NETFLIX, display_priorities: { US: 1 } }] },
+  '/watch/providers/tv': { results: [{ ...HULU, display_priorities: { US: 2 } }] },
 };
 
 const calls = [];
 const memStore = (key) => {
   const saved = { key, profile: null };
-  return { saved, cache: { data: {} }, loadProfile: () => saved.profile, saveProfile: (p) => { saved.profile = structuredClone(p); }, loadKey: () => saved.key, saveKey: (k) => { saved.key = k; } };
+  return {
+    saved, cache: { data: {} },
+    loadProfile: () => saved.profile, saveProfile: (p) => { saved.profile = structuredClone(p); },
+    loadKey: () => saved.key, saveKey: (k) => { saved.key = k; },
+  };
 };
 
-// Mock TMDB, plus a call(method, path, body) adapter so tests read like the
-// old HTTP routes even though the app now runs in the browser.
 async function setup(key = 'k') {
   const mock = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
@@ -106,223 +73,105 @@ async function setup(key = 'k') {
   await new Promise((r) => mock.listen(0, r));
   const store = memStore(key);
   const api = createApi({ store, base: `http://127.0.0.1:${mock.address().port}` });
-  const routes = {
-    'GET /api/status': () => api.status(),
-    'GET /api/providers': (q) => api.providers(q.get('region') ?? undefined),
-    'POST /api/settings': (q, b) => api.settings(b),
-    'POST /api/import': (q, b) => api.importCsv(b.csv),
-    'GET /api/categories': () => api.categories(),
-    'GET /api/browse': (q) => api.browse({
-      ...Object.fromEntries(q), onlyMine: q.get('onlyMine') === '1', hideRated: q.get('hideRated') !== '0',
-    }),
-    'GET /api/search': (q) => api.search(q.get('q')),
-    'GET /api/titles': (q) => api.titles(q.get('show') ?? undefined),
-    'POST /api/titles': (q, b) => api.mark(b),
-    'POST /api/titles/remove': (q, b) => api.unmark(b),
-    'GET /api/recommendations': (q) => api.recommendations({ type: q.get('type') ?? 'all' }),
-    'GET /api/watchlist': () => api.watchlist(),
-  };
-  const call = async (method, p, body) => {
-    const u = new URL(p, 'http://x');
-    try {
-      return { status: 200, body: await routes[`${method} ${u.pathname}`](u.searchParams, body) };
-    } catch (e) {
-      return { status: e.status ?? 500, body: { error: e.message } };
-    }
-  };
-  return { call, api, store, close: () => mock.close() };
+  return { api, store, close: () => mock.close() };
 }
 
-test('end to end: import, pick service, recommend, watchlist', async () => {
-  const { call, close } = await setup();
+// --- finding where to watch ----------------------------------------------------------
+test('a title shows where it streams, rent/buy, and top-billed cast', async () => {
+  const { api, close } = await setup();
   try {
-    assert.equal((await call('POST', '/api/import', { csv: RATINGS })).body.count, 3);
-    assert.equal((await call('POST', '/api/import', { csv: WATCHLIST })).body.kind, 'watchlist');
+    api.settings({ services: [8] });
+    const t = await api.title('movie', 1);
+    assert.equal(t.title, 'Vault Job');
+    assert.deepEqual(t.stream.map((p) => p.name), ['Netflix']);
+    assert.deepEqual(t.services.map((p) => p.name), ['Netflix'], 'marked as one of yours');
+    assert.deepEqual(t.rentBuy.map((p) => p.name), ['Hulu']);
+    assert.equal(t.backdrop, '/b1.jpg');
+    assert.equal(t.cast.length, 16, 'cast trimmed before caching');
+    assert.deepEqual(t.cast[0], { id: 90, name: 'Ann Lee', character: 'Self', profile: '/a.jpg' });
 
-    const prov = await call('GET', '/api/providers?region=US');
-    assert.deepEqual(prov.body.map((p) => p.name), ['Netflix', 'Hulu']);
-
-    // No services chosen: everything unseen shows up, seed titles never do
-    let r = (await call('GET', '/api/recommendations')).body.items;
-    assert.deepEqual(r.map((i) => i.title).sort(), ['On Hulu Only', 'Show Rec', 'Both Seeds Like Me'].sort());
-    assert.ok(!r.some((i) => i.imdbId === 'tt0000001'));
-    // Recommended by both seeds ranks first
-    assert.equal(r[0].title, 'Both Seeds Like Me');
-    assert.deepEqual(r[0].because.sort(), ['Seed Show', 'Seed, The Movie']);
-
-    await call('POST', '/api/settings', { services: [8] });
-    r = (await call('GET', '/api/recommendations')).body.items;
-    assert.deepEqual(r.map((i) => i.title).sort(), ['Both Seeds Like Me', 'Show Rec']);
-    assert.equal(r.find((i) => i.title === 'Show Rec').seasons, 3);
-
-    r = (await call('GET', '/api/recommendations?type=tv')).body.items;
-    assert.deepEqual(r.map((i) => i.title), ['Show Rec']);
-
-    const wl = (await call('GET', '/api/watchlist')).body.items;
-    assert.deepEqual(wl.map((i) => [i.title, i.available]), [['On Netflix', true], ['Nowhere', false]]);
-
-    const st = (await call('GET', '/api/status')).body;
-    assert.equal(st.ratings, 3);
-    assert.deepEqual(st.services, [8]);
+    const show = await api.title('tv', 3);
+    assert.deepEqual(show.cast[0], { id: 91, name: 'Bo Ray', character: 'Host', profile: null });
+    assert.equal(show.seasons, 2);
   } finally { close(); }
 });
 
-test('rejects bad input and missing key', async () => {
-  const { call, close } = await setup(null);
+test('an actor page lists their titles, without talk shows or repeats', async () => {
+  const { api, close } = await setup();
   try {
-    assert.equal((await call('POST', '/api/import', { csv: 'nope' })).status, 500);
-    assert.match((await call('GET', '/api/recommendations')).body.error, /TMDB key/);
+    const p = await api.person(90);
+    assert.equal(p.name, 'Ann Lee');
+    assert.deepEqual(p.items.map((i) => [i.title, i.role]), [['Cold Trail', 'Guest'], ['Vault Job', 'Self']]);
   } finally { close(); }
 });
 
-test('marking titles: reactions, reasons, watchlist, re-import keeps them', async () => {
-  const { call, close } = await setup();
+test('categories: genres by name, keywords for true crime, movies and shows mixed', async () => {
+  const { api, close } = await setup();
   try {
-    // Search returns full cards with where-to-watch
-    const found = (await call('GET', '/api/search?q=hand')).body.items;
-    assert.deepEqual(found.map((f) => [f.title, f.type]), [['Hand Picked', 'movie'], ['Hand Show', 'tv']]);
-    assert.deepEqual(found[1].stream.map((p) => p.name), ['Netflix']);
-    assert.equal(found[0].mine.reaction, null);
-
-    await call('POST', '/api/titles', { list: 'watchlist', type: 'movie', tmdbId: 40 });
-    const loved = (await call('POST', '/api/titles', {
-      list: 'ratings', type: 'movie', tmdbId: 40, reaction: 'love', reasons: ['Story', '  ', 5], note: ' great ',
-    })).body;
-    assert.equal(loved.rating, 10);
-    assert.deepEqual(loved.mine, { reaction: 'love', reasons: ['Story'], note: 'great', want: false });
-
-    let mine = (await call('GET', '/api/titles?show=love')).body;
-    assert.deepEqual(mine.items.map((i) => i.title), ['Hand Picked']);
-    assert.deepEqual(mine.counts, { love: 1, like: 0, dislike: 0, want: 0 }, 'rating takes it off the watchlist');
-
-    // Recommendations work with no IMDb data at all
-    const recs = (await call('GET', '/api/recommendations')).body.items;
-    assert.deepEqual(recs.map((r) => r.title), ['On Hulu Only']);
-    assert.deepEqual(recs[0].because, ['Hand Picked']);
-
-    // Show without an IMDb id still works on the watchlist
-    await call('POST', '/api/titles', { list: 'watchlist', type: 'tv', tmdbId: 41 });
-    const wl = (await call('GET', '/api/watchlist')).body.items;
-    assert.deepEqual(wl.map((w) => [w.title, w.mine.want]), [['Hand Show', true]]);
-
-    // Changing a reaction replaces instead of duplicating; numeric ratings still work
-    await call('POST', '/api/titles', { list: 'ratings', type: 'movie', tmdbId: 40, reaction: 'dislike' });
-    mine = (await call('GET', '/api/titles?show=dislike')).body;
-    assert.equal(mine.items.length, 1);
-    assert.equal(mine.counts.love, 0);
-    await call('POST', '/api/titles', { list: 'ratings', type: 'movie', tmdbId: 40, rating: 9 });
-    assert.equal((await call('GET', '/api/titles?show=love')).body.items.length, 1);
-
-    await call('POST', '/api/import', { csv: RATINGS });
-    assert.equal((await call('GET', '/api/status')).body.ratings, 4);
-
-    // IMDb-imported titles show their reaction on cards and can be cleared by imdb id
-    const browse = (await call('GET', '/api/browse?category=crime&hideRated=0')).body.items;
-    assert.equal(browse.find((i) => i.tmdbId === 1).mine.reaction, 'love');
-    await call('POST', '/api/titles/remove', { list: 'ratings', type: 'movie', tmdbId: 1, imdbId: 'tt0000001' });
-    assert.equal((await call('GET', '/api/status')).body.ratings, 3);
-
-    assert.equal((await call('POST', '/api/titles', { list: 'ratings', type: 'movie', tmdbId: 40, rating: 11 })).status, 400);
-    assert.equal((await call('POST', '/api/titles', { list: 'ratings', type: 'movie', tmdbId: 12345, rating: 5 })).status, 404);
-  } finally { close(); }
-});
-
-test('browse: categories map to genres or keywords, mix movies and shows, hide rated', async () => {
-  const { call, close } = await setup();
-  try {
-    const cats = (await call('GET', '/api/categories')).body;
-    assert.equal(cats.categories[0].name, 'True crime');
-    assert.ok(cats.trueCrime.some((c) => c.name === 'Heists & robberies'));
+    const { categories, trueCrime } = api.categories();
+    assert.equal(categories[0].name, 'True crime');
+    assert.ok(trueCrime.some((c) => c.name === 'Heists & robberies'));
 
     calls.length = 0;
-    let r = (await call('GET', '/api/browse?category=true-crime')).body;
-    const disc = calls.filter((u) => u.pathname.startsWith('/discover/'));
-    assert.equal(disc.length, 2);
-    for (const u of disc) {
+    let r = await api.browse({ category: 'true-crime' });
+    for (const u of calls.filter((x) => x.pathname.startsWith('/discover/'))) {
       assert.equal(u.searchParams.get('with_keywords'), '33722');
-      assert.equal(u.searchParams.get('with_watch_providers'), null, 'not limited to services by default');
+      assert.equal(u.searchParams.get('with_watch_providers'), null, 'shows everything by default');
     }
-    // Sorted by popularity across both types
-    assert.deepEqual(r.items.map((i) => i.title), ['Show Rec', 'On Hulu Only', 'Seed, The Movie']);
+    assert.deepEqual(r.items.map((i) => i.title), ['Cold Trail', 'Vault Job', 'Con Man']);
     assert.equal(r.totalPages, 3);
 
     calls.length = 0;
-    await call('GET', '/api/browse?category=thriller&type=movie&sort=top');
-    const u = calls.find((x) => x.pathname === '/discover/movie');
-    assert.equal(u.searchParams.get('with_genres'), '53|9648');
-    assert.equal(u.searchParams.get('sort_by'), 'vote_average.desc');
-    assert.ok(!calls.some((x) => x.pathname === '/discover/tv'));
+    await api.browse({ category: 'thriller' });
+    assert.equal(calls.find((x) => x.pathname === '/discover/movie').searchParams.get('with_genres'), '53|9648');
 
-    // Rated titles drop out; only-my-services passes providers to TMDB
-    await call('POST', '/api/import', { csv: RATINGS });
-    await call('POST', '/api/settings', { services: [8, 15] });
     calls.length = 0;
-    r = (await call('GET', '/api/browse?category=crime&onlyMine=1')).body;
-    assert.ok(!r.items.some((i) => i.tmdbId === 1));
+    await api.browse({ category: 'horror' });
+    assert.ok(!calls.some((x) => x.pathname === '/discover/tv'), 'no TV horror genre, so only movies');
+
+    // Only my services passes them to TMDB; seen titles drop out
+    api.settings({ services: [8, 15] });
+    await api.mark({ list: 'ratings', type: 'movie', tmdbId: 1, reaction: 'love' });
+    calls.length = 0;
+    r = await api.browse({ category: 'crime', onlyMine: true });
     const d = calls.find((x) => x.pathname === '/discover/tv');
     assert.equal(d.searchParams.get('with_watch_providers'), '8|15');
     assert.equal(d.searchParams.get('watch_region'), 'US');
-    assert.deepEqual(r.items.find((i) => i.title === 'Show Rec').services.map((p) => p.name), ['Netflix']);
+    assert.ok(!r.items.some((i) => i.tmdbId === 1));
 
-    // Horror has no TV genre, so only movies are queried
-    calls.length = 0;
-    await call('GET', '/api/browse?category=horror');
-    assert.ok(!calls.some((x) => x.pathname === '/discover/tv'));
-
-    assert.equal((await call('GET', '/api/browse?category=nope')).status, 400);
+    await assert.rejects(api.browse({ category: 'nope' }), /Unknown category/);
   } finally { close(); }
 });
 
-test('dislikes push similar titles down', async () => {
-  const { call, close } = await setup();
-  try {
-    await call('POST', '/api/titles', { list: 'ratings', type: 'movie', tmdbId: 40, reaction: 'like' });
-    let recs = (await call('GET', '/api/recommendations')).body.items;
-    assert.deepEqual(recs.map((r) => r.title), ['On Hulu Only']);
-    const before = recs[0].score;
-
-    // Seed's recs also include Hulu Only, so disliking Seed lowers it, but
-    // one dislike doesn't cancel a like. Seed's other rec (20) only had
-    // negative support, so it never shows.
-    await call('POST', '/api/titles', { list: 'ratings', type: 'movie', tmdbId: 1, reaction: 'dislike' });
-    recs = (await call('GET', '/api/recommendations')).body.items;
-    assert.deepEqual(recs.map((r) => r.title), ['On Hulu Only']);
-    assert.ok(recs[0].score < before);
-    assert.deepEqual(recs[0].because, ['Hand Picked']);
-  } finally { close(); }
-});
-
-test('true crime subcategory: true crime AND each topic, plus documentaries', async () => {
-  const { call, close } = await setup();
+test('true crime subcategory: true crime AND each topic, plus true-story crime and docs', async () => {
+  const { api, close } = await setup();
   try {
     calls.length = 0;
-    const r = (await call('GET', '/api/browse?category=true-crime&sub=heist&type=movie')).body;
+    const r = await api.browse({ category: 'true-crime', sub: 'heist' });
     assert.equal(r.sub, 'Heists & robberies');
     const disc = calls.filter((u) => u.pathname === '/discover/movie').map((u) => [u.searchParams.get('with_keywords'), u.searchParams.get('with_genres')]);
-    assert.equal(disc.length, 9, 'two anchored calls per keyword plus one documentary call');
+    assert.equal(disc.length, 9);
     assert.deepEqual(disc.find(([k]) => k === '33722,10051'), ['33722,10051', null]);
     assert.deepEqual(disc.find(([k]) => k === '9672,10051'), ['9672,10051', '80']);
     assert.deepEqual(disc.find(([, g]) => g === '99'), ['10051|191845|15363|642', '99']);
-    // Same title from several calls shows up once
-    assert.deepEqual(r.items.map((i) => i.tmdbId), [21, 1]);
-
-    assert.equal((await call('GET', '/api/browse?category=true-crime&sub=nope')).status, 400);
+    assert.deepEqual(r.items.map((i) => i.tmdbId), [3, 1, 2], 'each title once');
+    await assert.rejects(api.browse({ category: 'true-crime', sub: 'nope' }), /Unknown subcategory/);
   } finally { close(); }
 });
 
-test('search: people bring their titles, plot words become topics, categories get suggested', async () => {
-  const { call, close } = await setup();
+test('search: titles, people with photos, plot words as topics, category shortcuts', async () => {
+  const { api, close } = await setup();
   try {
-    let r = (await call('GET', '/api/search?q=some actor')).body;
-    assert.deepEqual(r.items.map((i) => i.title), ['On Hulu Only', 'Show Rec']);
+    let r = await api.search('ann lee');
+    assert.deepEqual(r.people, [{ id: 90, name: 'Ann Lee', profile: '/a.jpg', dept: 'Acting' }]);
+    assert.deepEqual(r.items.map((i) => i.title), ['Vault Job']);
 
-    calls.length = 0;
-    r = (await call('GET', '/api/search?q=nurse who killed patients')).body;
+    r = await api.search('nurse who killed patients');
     // "killer" isn't "killed" and "nursery" isn't "nurse": only exact tags count
     assert.equal(r.topic.label, 'nurse + patient');
-    assert.deepEqual(r.topic.items.map((i) => i.title), ['On Hulu Only']);
-    assert.equal(calls.find((u) => u.pathname === '/discover/movie').searchParams.get('with_keywords'), '500,501');
+    assert.deepEqual(r.topic.items.map((i) => i.title), ['Con Man']);
 
+    assert.deepEqual((await api.search('  ')).items, []);
     assert.deepEqual(matchCategories('that bank heist doc').map((s) => s.label), ['Documentary', 'True crime › Heists & robberies']);
     assert.deepEqual(matchCategories("lover's quarrel").map((s) => s.label), ['True crime › Love gone wrong']);
     assert.deepEqual(matchCategories('con man').map((s) => s.label), ['True crime › Con artists & scams']);
@@ -330,27 +179,66 @@ test('search: people bring their titles, plot words become topics, categories ge
   } finally { close(); }
 });
 
+// --- your list ---------------------------------------------------------------------
+test('marking: watchlist, reactions with reasons, and the list views', async () => {
+  const { api, store, close } = await setup();
+  try {
+    api.settings({ services: [8] });
+    let m = (await api.mark({ list: 'watchlist', type: 'tv', tmdbId: 3 })).mine;
+    assert.equal(m.want, true);
+    await api.mark({ list: 'watchlist', type: 'movie', tmdbId: 4 });
+
+    const list = (await api.list('want')).items;
+    assert.deepEqual(list.map((i) => [i.title, i.services.length]), [['Nowhere Doc', 0], ['Cold Trail', 1]], 'newest first, with your services');
+
+    m = (await api.mark({ list: 'ratings', type: 'tv', tmdbId: 3, reaction: 'love', reasons: ['Gripping case', ' ', 5], note: ' wow ' })).mine;
+    assert.deepEqual(m, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', want: false }, 'seeing it takes it off the watchlist');
+    assert.deepEqual(api.status().counts, { want: 1, love: 1, like: 0, dislike: 0 });
+
+    // Changing your mind replaces, never duplicates
+    await api.mark({ list: 'ratings', type: 'tv', tmdbId: 3, reaction: 'dislike' });
+    assert.deepEqual(api.status().counts, { want: 1, love: 0, like: 0, dislike: 1 });
+    assert.deepEqual((await api.list('dislike')).items.map((i) => i.title), ['Cold Trail']);
+    assert.equal(store.saved.profile.ratings.length, 1);
+
+    api.unmark({ list: 'ratings', type: 'tv', tmdbId: 3 });
+    assert.equal(api.status().counts.dislike, 0);
+
+    await assert.rejects(api.mark({ list: 'ratings', type: 'movie', tmdbId: 1 }), /how you felt/);
+    await assert.rejects(api.mark({ list: 'ratings', type: 'movie', tmdbId: 12345, reaction: 'like' }), /no such title/);
+    await assert.rejects(api.mark({ list: 'nope', type: 'movie', tmdbId: 1 }), /Bad title/);
+  } finally { close(); }
+});
+
+test('lists saved by the older version (1-10 ratings) still count', () => {
+  const store = memStore('k');
+  store.saved.profile = { ratings: [{ tmdbId: 1, type: 'movie', rating: 9 }], watchlist: [] };
+  const api = createApi({ store, base: 'http://127.0.0.1:1' });
+  assert.deepEqual(api.status().counts, { want: 0, love: 1, like: 0, dislike: 0 });
+});
+
 test('key check, backup and restore', async () => {
   const { api, store, close } = await setup(null);
   try {
-    assert.equal(api.hasKey(), false);
+    assert.equal(api.status().hasKey, false);
+    await assert.rejects(api.search('x'), /TMDB key/);
     await assert.rejects(api.setKey('bad'), /rejected/);
     assert.equal(store.saved.key, null);
     await api.setKey('  good  ');
     assert.equal(store.saved.key, 'good');
-    await api.mark({ list: 'ratings', type: 'movie', tmdbId: 40, reaction: 'love', reasons: ['Story'] });
+    await api.mark({ list: 'ratings', type: 'movie', tmdbId: 1, reaction: 'like', reasons: ['Bingeable'] });
 
     const backup = api.exportData();
     assert.ok(!backup.includes('good'), 'the key stays out of backups');
     api.reset();
-    assert.equal(api.status().ratings, 0);
+    assert.equal(api.status().counts.like, 0);
     assert.deepEqual(api.importData(backup), { ratings: 1, watchlist: 0 });
-    assert.equal(store.saved.profile.ratings[0].reasons[0], 'Story');
+    assert.equal(store.saved.profile.ratings[0].reasons[0], 'Bingeable');
     assert.throws(() => api.importData('{"hello":1}'), /backup/);
   } finally { close(); }
 });
 
-test('browser store: profile wins over cache when storage is full', () => {
+test('browser store: your list wins over the cache when storage is full', () => {
   const data = new Map();
   const ls = {
     getItem: (k) => data.get(k) ?? null,
@@ -369,6 +257,44 @@ test('browser store: profile wins over cache when storage is full', () => {
   assert.throws(() => store.saveProfile({ ratings: ['z'.repeat(2000)] }), /storage/);
 });
 
+// --- the rest -------------------------------------------------------------------------
+test('reasons fit the kind of title', () => {
+  const tc = { genres: ['Documentary', 'Crime'] };
+  assert.equal(kindOf(tc), 'truecrime');
+  assert.ok(reasonsFor(tc, 'love').includes('Gripping case'));
+  assert.ok(reasonsFor(tc, 'dislike').includes('Too graphic'));
+  assert.equal(reasonsFor(tc, 'dislike').at(-1), "Didn't finish");
+  assert.equal(kindOf({ genres: ['Comedy'] }), 'comedy');
+  assert.equal(kindOf({ genres: ['Comedy', 'Romance'] }), 'romance');
+  assert.equal(kindOf({ genres: ['Crime', 'Drama'] }), 'crime');
+  assert.equal(kindOf({ genres: ['Sci-Fi & Fantasy', 'Drama'] }), 'spectacle');
+  assert.equal(kindOf({ genres: ['Animation', 'Comedy'] }), 'family');
+  assert.equal(kindOf({ genres: [] }), 'drama');
+  // An old pick from another list still shows so it can be turned off
+  assert.ok(reasonsFor({ genres: ['Comedy'] }, 'like', ['Story']).includes('Story'));
+});
+
+test('sample mode works end to end with no network', async () => {
+  const api = createApi({ store: memStore('sample'), fetchImpl: demoFetch });
+  api.settings({ services: [8, 15] });
+
+  let r = await api.search('bank heist');
+  assert.deepEqual(r.suggestions.map((x) => x.label), ['True crime › Heists & robberies']);
+  assert.deepEqual(r.items.map((i) => i.title), ['Heist Week']);
+
+  r = await api.browse({ category: 'true-crime', sub: 'heist' });
+  assert.deepEqual(r.items.map((i) => i.title), ['The Vault Under Fifth Street', 'Heist Week', 'Getaway Driver']);
+  assert.deepEqual(r.items[0].services.map((p) => p.name), ['Netflix']);
+
+  const t = await api.title('tv', 102);
+  assert.ok(t.cast.length >= 2 && t.cast[0].profile.startsWith('data:'));
+  const p = await api.person(t.cast[0].id);
+  assert.ok(p.items.some((i) => i.tmdbId === 102));
+
+  r = await api.search('castellano');
+  assert.deepEqual(r.people.map((x) => x.name), ['Ray Castellano']);
+});
+
 test('static server serves the app and nothing outside it', async () => {
   const server = createServer();
   await new Promise((r) => server.listen(0, r));
@@ -383,53 +309,4 @@ test('static server serves the app and nothing outside it', async () => {
     res = await fetch(base + '/%2e%2e/package.json');
     assert.ok([403, 404].includes(res.status));
   } finally { server.close(); }
-});
-
-test('sample mode works end to end with no network', async () => {
-  const api = createApi({ store: memStore('sample'), fetchImpl: demoFetch });
-  api.settings({ services: [8, 15] });
-
-  let r = await api.search('bank heist');
-  assert.deepEqual(r.suggestions.map((x) => x.label), ['True crime › Heists & robberies']);
-  assert.deepEqual(r.items.map((i) => i.title), ['Heist Week']);
-  assert.deepEqual(r.topic.items.map((i) => i.title), ['The Vault Under Fifth Street']);
-
-  r = await api.search('nurse who killed patients');
-  assert.equal(r.topic.label, 'nurse + patient');
-  assert.deepEqual(r.topic.items.map((i) => i.title), ['Night Shift: The Hospital Murders']);
-
-  r = await api.browse({ category: 'true-crime', sub: 'heist' });
-  assert.deepEqual(r.items.map((i) => i.title), ['The Vault Under Fifth Street', 'Heist Week', 'Getaway Driver']);
-  assert.deepEqual(r.items[2].rentBuy.map((p) => p.name), ['Prime Video', 'Apple TV+']);
-  assert.deepEqual(r.items[0].services.map((p) => p.name), ['Netflix']);
-
-  r = await api.browse({ category: 'true-crime', sub: 'love' });
-  assert.deepEqual(r.items.map((i) => i.title), ['Sweetheart, Interrupted', 'The Poisoner Next Door']);
-
-  r = await api.browse({ category: 'comedy' });
-  assert.deepEqual(r.items.map((i) => i.title).sort(), ['Laugh Track', 'The Last Laugh Tour']);
-
-  await api.mark({ list: 'ratings', type: 'tv', tmdbId: 112, reaction: 'love' });
-  r = await api.recommendations();
-  assert.ok(r.items.length > 0);
-  assert.ok(r.items.every((i) => i.services.length), 'filtered to Netflix/Hulu');
-});
-
-test('reasons fit the kind of title', () => {
-  const tc = { genres: ['Documentary', 'Crime'] };
-  assert.equal(kindOf(tc), 'truecrime');
-  assert.ok(reasonsFor(tc, 'love').includes('Gripping case'));
-  assert.ok(reasonsFor(tc, 'dislike').includes('Too graphic'));
-  assert.equal(reasonsFor(tc, 'dislike').at(-1), "Didn't finish");
-
-  assert.equal(kindOf({ genres: ['Comedy'] }), 'comedy');
-  assert.equal(kindOf({ genres: ['Comedy', 'Romance'] }), 'romance');
-  assert.equal(kindOf({ genres: ['Crime', 'Drama'] }), 'crime');
-  assert.equal(kindOf({ genres: ['Sci-Fi & Fantasy', 'Drama'] }), 'spectacle');
-  assert.equal(kindOf({ genres: ['Animation', 'Comedy'] }), 'family');
-  assert.equal(kindOf({ genres: [] }), 'drama');
-  assert.ok(reasonsFor({ genres: ['Comedy'] }, 'like').includes('Laughed out loud'));
-
-  // An old pick from another list still shows so it can be turned off
-  assert.ok(reasonsFor({ genres: ['Comedy'] }, 'like', ['Story']).includes('Story'));
 });
