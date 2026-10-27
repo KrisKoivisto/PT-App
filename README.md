@@ -3,7 +3,7 @@
 A phone app that does two things:
 
 1. **Tells you where something is streaming.** Search a title, an actor, or what it's about ("bank heist", "nurse who killed patients"), or browse a category. True crime splits into subcategories like Love gone wrong, Heists & robberies, and Con artists & scams. Every poster shows the services streaming it, with a green ring on the ones you have. Tap a poster for every way to watch it and the cast. Tap an actor for everything they're in.
-2. **Keeps your list.** A watchlist, plus what you've seen and how you felt (Loved it, Liked it, Not for me), with quick reasons that fit the kind of show.
+2. **Keeps your list.** Every poster has three one-tap buttons: ✓ Seen it, Bookmark, ✕ Pass. Seen and passed titles drop off the category lists next time. My list shows Bookmarked, Seen and Passed. On the detail screen you can also say how it was (Loved it, Liked it, Not for me), with quick reasons that fit the kind of show.
 
 It doesn't log in to any streaming service.
 

@@ -107,28 +107,41 @@ input[type=checkbox] { accent-color: var(--accent); }
 /* --- poster wall --- */
 .wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 16px 10px; }
 @media (min-width: 700px) { .wall { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 22px 14px; } }
-.tile { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 0; border: 0; background: none; text-align: left; }
+.tile { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .tile .poster {
+  width: 100%; padding: 0; border: 0; font: inherit; color: inherit; text-align: left;
   position: relative; display: block; aspect-ratio: 2 / 3; border-radius: 8px; overflow: hidden; background: var(--raised);
   box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
 }
 .tile .poster > img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .tile .poster::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(0, 0, 0, .6), transparent 38%); pointer-events: none; }
 .noposter { position: absolute; inset: 0; display: flex; align-items: flex-end; padding: 10px; font: 700 1.05rem/1.05 var(--display); text-transform: uppercase; color: var(--soft); }
-.badge {
-  position: absolute; top: 6px; right: 6px; z-index: 1; width: 26px; height: 26px; border-radius: 50%;
-  display: grid; place-items: center; background: rgba(0, 0, 0, .72); font-size: 14px;
-}
-.b-love { color: var(--love); } .b-like { color: var(--like); } .b-dislike { color: var(--dislike); } .b-want { color: var(--want); }
 .stamps { position: absolute; left: 6px; right: 6px; bottom: 6px; z-index: 1; display: flex; gap: 4px; }
 .stamp { width: 24px; height: 24px; border-radius: 6px; overflow: hidden; flex: none; box-shadow: 0 0 0 1px rgba(0, 0, 0, .55); background: var(--raised); }
 .stamp img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .stamp.yours { box-shadow: 0 0 0 2px var(--yours); }
 .stamp.more, .stamp.none { width: auto; padding: 0 6px; background: rgba(0, 0, 0, .78); font-size: .66rem; line-height: 24px; color: var(--soft); }
 .logo-text { display: grid; place-items: center; width: 100%; height: 100%; font-size: .62rem; font-weight: 700; }
-.tile .t { margin-top: 5px; font-size: .82rem; font-weight: 600; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tile .t { margin-top: 2px; font-size: .82rem; font-weight: 600; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .tile .y { font-size: .72rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tile:active .poster { transform: scale(.97); }
+.tile .poster:active { transform: scale(.97); }
+.tile.passed .poster { opacity: .35; }
+
+/* One-tap marks under every poster, and bigger at the top of the detail screen */
+.quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 6px; }
+.q {
+  height: 34px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--muted);
+}
+.q .i { width: 18px; height: 18px; stroke-width: 2.2; }
+.q span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.q.seen.on { background: var(--yours); border-color: var(--yours); color: var(--on-accent); }
+.q.want.on { background: var(--want); border-color: var(--want); color: var(--on-accent); }
+.q.pass.on { background: var(--dislike); border-color: var(--dislike); color: var(--on-accent); }
+.quick.big { gap: 8px; margin-top: 0; }
+.quick.big .q { height: auto; display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 2px 9px; border-radius: 12px; font-size: .74rem; }
+.quick.big .q .i { width: 22px; height: 22px; }
+.quick.big .q span { position: static; width: auto; height: auto; clip: auto; overflow: visible; }
 
 /* --- people --- */
 .people, .cast { gap: 14px; }
@@ -181,7 +194,7 @@ input[type=checkbox] { accent-color: var(--accent); }
 .rent { margin: 12px 0 0; font-size: .82rem; color: var(--soft); }
 .all-ways { display: inline-block; margin-top: 10px; font-size: .88rem; font-weight: 600; text-decoration: none; }
 .source { margin: 8px 0 0; font-size: .66rem; color: var(--muted); }
-.takes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.takes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
 .take {
   display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 2px 9px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px; color: var(--muted); font-size: .72rem;

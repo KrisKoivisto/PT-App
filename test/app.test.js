@@ -191,41 +191,63 @@ test('search: titles, people with photos, plot words as topics, category shortcu
 });
 
 // --- your list ---------------------------------------------------------------------
-test('marking: watchlist, reactions with reasons, and the list views', async () => {
+test('one-tap marks: seen, bookmark, pass, and how they replace each other', async () => {
   const { api, store, close } = await setup();
   try {
     api.settings({ services: [8] });
     let m = (await api.mark({ list: 'watchlist', type: 'tv', tmdbId: 3 })).mine;
-    assert.equal(m.want, true);
+    assert.deepEqual([m.want, m.reaction, m.passed], [true, null, false]);
     await api.mark({ list: 'watchlist', type: 'movie', tmdbId: 4 });
-
     const list = (await api.list('want')).items;
     assert.deepEqual(list.map((i) => [i.title, i.services.length]), [['Nowhere Doc', 0], ['Cold Trail', 1]], 'newest first, with your services');
 
-    m = (await api.mark({ list: 'ratings', type: 'tv', tmdbId: 3, reaction: 'love', reasons: ['Gripping case', ' ', 5], note: ' wow ' })).mine;
-    assert.deepEqual(m, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', want: false }, 'seeing it takes it off the watchlist');
-    assert.deepEqual(api.status().counts, { want: 1, love: 1, like: 0, dislike: 0 });
+    // Seen it: one tap, no rating needed; takes it off the bookmarks
+    m = (await api.mark({ list: 'ratings', type: 'tv', tmdbId: 3, reaction: 'seen' })).mine;
+    assert.deepEqual([m.reaction, m.want, m.passed], ['seen', false, false]);
+    assert.deepEqual(api.status().counts, { want: 1, seen: 1, passed: 0 });
 
-    // Changing your mind replaces, never duplicates
-    await api.mark({ list: 'ratings', type: 'tv', tmdbId: 3, reaction: 'dislike' });
-    assert.deepEqual(api.status().counts, { want: 1, love: 0, like: 0, dislike: 1 });
-    assert.deepEqual((await api.list('dislike')).items.map((i) => i.title), ['Cold Trail']);
+    // How was it (optional) with reasons; replaces, never duplicates
+    m = (await api.mark({ list: 'ratings', type: 'tv', tmdbId: 3, reaction: 'love', reasons: ['Gripping case', ' ', 5], note: ' wow ' })).mine;
+    assert.deepEqual(m, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', want: false, passed: false });
     assert.equal(store.saved.profile.ratings.length, 1);
 
-    api.unmark({ list: 'ratings', type: 'tv', tmdbId: 3 });
-    assert.equal(api.status().counts.dislike, 0);
+    // Pass undoes seen and bookmark; bookmarking undoes pass
+    m = (await api.mark({ list: 'passed', type: 'tv', tmdbId: 3 })).mine;
+    assert.deepEqual([m.reaction, m.want, m.passed], [null, false, true]);
+    m = (await api.mark({ list: 'passed', type: 'movie', tmdbId: 4 })).mine;
+    assert.deepEqual([m.want, m.passed], [false, true]);
+    assert.deepEqual(api.status().counts, { want: 0, seen: 0, passed: 2 });
+    assert.deepEqual((await api.list('passed')).items.map((i) => i.title), ['Nowhere Doc', 'Cold Trail']);
+    m = (await api.mark({ list: 'watchlist', type: 'movie', tmdbId: 4 })).mine;
+    assert.deepEqual([m.want, m.passed], [true, false]);
+
+    api.unmark({ list: 'passed', type: 'tv', tmdbId: 3 });
+    assert.deepEqual(api.status().counts, { want: 1, seen: 0, passed: 0 });
 
     await assert.rejects(api.mark({ list: 'ratings', type: 'movie', tmdbId: 1 }), /how you felt/);
-    await assert.rejects(api.mark({ list: 'ratings', type: 'movie', tmdbId: 12345, reaction: 'like' }), /no such title/);
+    await assert.rejects(api.mark({ list: 'ratings', type: 'movie', tmdbId: 12345, reaction: 'seen' }), /no such title/);
     await assert.rejects(api.mark({ list: 'nope', type: 'movie', tmdbId: 1 }), /Bad title/);
+    await assert.rejects(api.list('nope'), /Unknown list/);
   } finally { close(); }
 });
 
-test('lists saved by the older version (1-10 ratings) still count', () => {
+test('seen and passed titles drop out of categories, but not search', async () => {
+  const { api, close } = await setup();
+  try {
+    await api.mark({ list: 'ratings', type: 'movie', tmdbId: 1, reaction: 'seen' });
+    await api.mark({ list: 'passed', type: 'tv', tmdbId: 3 });
+    const r = await api.browse({ category: 'true-crime' });
+    assert.deepEqual(r.items.map((i) => i.title), ['Con Man']);
+    const s = await api.search('vault');
+    assert.ok(s.items.some((i) => i.title === 'Vault Job' && i.mine.reaction === 'seen'));
+  } finally { close(); }
+});
+
+test('lists saved by older versions still count as seen', () => {
   const store = memStore('k');
-  store.saved.profile = { ratings: [{ tmdbId: 1, type: 'movie', rating: 9 }], watchlist: [] };
+  store.saved.profile = { ratings: [{ tmdbId: 1, type: 'movie', rating: 9 }, { tmdbId: 2, type: 'movie', rating: 6 }], watchlist: [] };
   const api = createApi({ store, base: 'http://127.0.0.1:1' });
-  assert.deepEqual(api.status().counts, { want: 0, love: 1, like: 0, dislike: 0 });
+  assert.deepEqual(api.status().counts, { want: 0, seen: 2, passed: 0 });
 });
 
 test('built-in key works with nothing saved, so no setup is needed', async () => {
@@ -256,8 +278,8 @@ test('key check, backup and restore', async () => {
     const backup = api.exportData();
     assert.ok(!backup.includes('good'), 'the key stays out of backups');
     api.reset();
-    assert.equal(api.status().counts.like, 0);
-    assert.deepEqual(api.importData(backup), { ratings: 1, watchlist: 0 });
+    assert.equal(api.status().counts.seen, 0);
+    assert.deepEqual(api.importData(backup), { ratings: 1, watchlist: 0, passed: 0 });
     assert.equal(store.saved.profile.ratings[0].reasons[0], 'Bingeable');
     assert.throws(() => api.importData('{"hello":1}'), /backup/);
   } finally { close(); }

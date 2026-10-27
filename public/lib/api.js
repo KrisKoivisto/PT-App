@@ -1,9 +1,10 @@
 import { createTmdb, pool } from './tmdb.js';
 import { shape, matchServices, brand } from './titles.js';
 import { browse, search, detail, CATEGORIES, TRUE_CRIME_SUBS } from './browse.js';
-import { REACTIONS, reactionOf, annotate } from './mine.js';
+import { REACTIONS, annotate } from './mine.js';
 
-export const defaultProfile = () => ({ region: 'US', services: [], serviceBrands: [], ratings: [], watchlist: [] });
+export const defaultProfile = () => ({ region: 'US', services: [], serviceBrands: [], ratings: [], watchlist: [], passed: [] });
+const LISTS = ['ratings', 'watchlist', 'passed'];
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const clean = (s, max) => (typeof s === 'string' ? s.trim().slice(0, max) : '');
@@ -21,7 +22,6 @@ export function createApi({ store, base, fetchImpl, builtInKey = null }) {
   const needKey = () => tmdb ?? (() => { throw fail('Add your TMDB key in Settings first.'); })();
   const save = () => store.saveProfile(profile);
   const done = (x) => { cache.save?.(); return x; };
-  const reactionFor = (i) => i.reaction ?? reactionOf(i.rating);
 
   return {
     async setKey(k) {
@@ -35,11 +35,7 @@ export function createApi({ store, base, fetchImpl, builtInKey = null }) {
     },
 
     status() {
-      const counts = { want: profile.watchlist.length, love: 0, like: 0, dislike: 0 };
-      for (const r of profile.ratings) {
-        const k = reactionFor(r);
-        if (k) counts[k]++;
-      }
+      const counts = { want: profile.watchlist.length, seen: profile.ratings.length, passed: profile.passed.length };
       return { hasKey: !!tmdb, ownKey: !!store.loadKey(), region: profile.region, services: profile.services, serviceBrands: profile.serviceBrands, counts };
     },
 
@@ -106,12 +102,11 @@ export function createApi({ store, base, fetchImpl, builtInKey = null }) {
       });
     },
 
-    // Your list: the watchlist, or what you've seen with a given reaction,
-    // newest first, with where each one streams now.
+    // Your list: bookmarked, seen, or passed, newest first, with where each
+    // one streams now.
     async list(show = 'want') {
-      const src = show === 'want'
-        ? profile.watchlist
-        : profile.ratings.filter((i) => reactionFor(i) === show);
+      const src = { want: profile.watchlist, seen: profile.ratings, passed: profile.passed }[show];
+      if (!src) throw fail('Unknown list.');
       const t = needKey();
       const items = (await pool(src.filter((i) => i.tmdbId).reverse(), 8, async (i) => {
         const d = await t.details(i.type, i.tmdbId, profile.region);
@@ -122,11 +117,12 @@ export function createApi({ store, base, fetchImpl, builtInKey = null }) {
       return done({ items: annotate(profile, items) });
     },
 
-    // Mark a title: on the watchlist, or seen with a reaction (and optional
-    // reasons and note).
+    // Mark a title: bookmarked (watchlist), seen (with an optional reaction,
+    // reasons and note), or passed. Seen and passed rule each other out, and
+    // either one takes a title off the watchlist.
     async mark(body) {
       const { list, type, tmdbId } = body;
-      if (!['ratings', 'watchlist'].includes(list) || !['movie', 'tv'].includes(type) || !Number.isInteger(tmdbId)) {
+      if (!LISTS.includes(list) || !['movie', 'tv'].includes(type) || !Number.isInteger(tmdbId)) {
         throw fail('Bad title.');
       }
       if (list === 'ratings' && !REACTIONS[body.reaction]) throw fail('Pick how you felt about it.');
@@ -149,14 +145,14 @@ export function createApi({ store, base, fetchImpl, builtInKey = null }) {
       }
       const same = (i) => (i.tmdbId === tmdbId && i.type === type) || (item.imdbId && i.imdbId === item.imdbId);
       profile[list] = [...profile[list].filter((i) => !same(i)), item];
-      // Seeing something takes it off the watchlist.
-      if (list === 'ratings') profile.watchlist = profile.watchlist.filter((i) => !same(i));
+      const drop = { ratings: ['watchlist', 'passed'], passed: ['watchlist', 'ratings'], watchlist: ['passed'] }[list];
+      for (const l of drop) profile[l] = profile[l].filter((i) => !same(i));
       save();
       return done(annotate(profile, [item])[0]);
     },
 
     unmark({ list, type, tmdbId, imdbId }) {
-      if (!['ratings', 'watchlist'].includes(list)) throw fail('Bad list.');
+      if (!LISTS.includes(list)) throw fail('Bad list.');
       profile[list] = profile[list].filter((i) => !((i.tmdbId === tmdbId && i.type === type) || (imdbId && i.imdbId === imdbId)));
       save();
       return { ok: true };
@@ -176,9 +172,10 @@ export function createApi({ store, base, fetchImpl, builtInKey = null }) {
         serviceBrands: Array.isArray(p.serviceBrands) ? p.serviceBrands : [],
         ratings: Array.isArray(p.ratings) ? p.ratings : [],
         watchlist: Array.isArray(p.watchlist) ? p.watchlist : [],
+        passed: Array.isArray(p.passed) ? p.passed : [],
       });
       save();
-      return { ratings: profile.ratings.length, watchlist: profile.watchlist.length };
+      return { ratings: profile.ratings.length, watchlist: profile.watchlist.length, passed: profile.passed.length };
     },
 
     reset() {

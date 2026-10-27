@@ -108,9 +108,9 @@ export async function browse(tmdb, profile, { category, sub = null, page = 1, on
     for (const x of r?.results ?? []) byKey.set(`${t}:${x.id}`, { type: t, id: x.id, rank: x.popularity ?? 0 });
   });
 
-  // Movies and shows mixed, most popular first, minus what you've seen.
+  // Movies and shows mixed, most popular first, minus what you've seen or passed.
   const found = [...byKey.values()].sort((a, b) => b.rank - a.rank);
-  const seen = seenSet(profile.ratings);
+  const seen = seenSet([...profile.ratings, ...(profile.passed ?? [])]);
   const items = (await detail(tmdb, profile, found)).filter((i) => !isSeen(seen, i));
   return { items, page, totalPages, category: cat.name, sub: subcat?.name ?? null };
 }

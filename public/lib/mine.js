@@ -1,4 +1,5 @@
-export const REACTIONS = { love: 'Loved it', like: 'Liked it', dislike: 'Not for me' };
+// "Seen it" is one tap; how you felt about it is optional on top.
+export const REACTIONS = { seen: 'Seen it', love: 'Loved it', like: 'Liked it', dislike: 'Not for me' };
 
 // Lists saved by earlier versions stored a 1-10 rating instead of a reaction.
 export const reactionOf = (rating) =>
@@ -16,16 +17,18 @@ function index(list) {
 export function annotate(profile, items) {
   const rated = index(profile.ratings);
   const want = index(profile.watchlist);
+  const passed = index(profile.passed ?? []);
   return items.map((it) => {
     const k = keys(it);
     const r = k.map((x) => rated.get(x)).find(Boolean);
     return {
       ...it,
       mine: {
-        reaction: r ? r.reaction ?? reactionOf(r.rating) : null,
+        reaction: r ? r.reaction ?? reactionOf(r.rating) ?? 'seen' : null,
         reasons: r?.reasons ?? [],
         note: r?.note ?? '',
         want: k.some((x) => want.has(x)),
+        passed: k.some((x) => passed.has(x)),
       },
     };
   });

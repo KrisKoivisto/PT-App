@@ -12,7 +12,8 @@ const REGIONS = {
   SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', BR: 'Brazil', MX: 'Mexico',
   IN: 'India', JP: 'Japan', KR: 'South Korea',
 };
-const REACTIONS = [
+// How you felt about something you've seen. Optional, on the detail screen.
+const FEELINGS = [
   ['love', 'Loved it', 'heart'],
   ['like', 'Liked it', 'up'],
   ['dislike', 'Not for me', 'down'],
@@ -26,9 +27,9 @@ const PATHS = {
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   back: '<path d="m15 5-7 7 7 7"/>',
   star: '<path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6-4.5-4.2 6.1-.7z"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7"/>',
 };
 const icon = (name, filled = false) => `<svg class="i${filled ? ' fill' : ''}" viewBox="0 0 24 24" aria-hidden="true">${PATHS[name]}</svg>`;
-const BADGE = { love: 'heart', like: 'up', dislike: 'down' };
 
 // Sample mode: made-up titles and no TMDB key needed. On with ?demo, or when
 // the page that loads this sets window.WTW_DEMO (the shareable preview).
@@ -84,23 +85,33 @@ const logoImg = (p, size = 'w92') => (p.logo
   : `<span class="logo-text">${esc(p.name.slice(0, 2))}</span>`);
 
 // --- poster tiles --------------------------------------------------------------
+// The three one-tap marks on every poster, also at the top of the detail screen.
+function quickButtons(m, attr) {
+  const seen = !!m.reaction;
+  return [
+    ['seen', 'Seen it', 'Seen', 'check', seen],
+    ['want', 'Bookmark', 'Bookmarked', 'bookmark', !!m.want],
+    ['pass', 'Pass', 'Passed', 'x', !!m.passed],
+  ].map(([k, label, onLabel, ic, on]) =>
+    `<button ${attr}="${k}" class="q ${k}${on ? ' on' : ''}" aria-pressed="${on}" aria-label="${on ? onLabel : label}">${icon(ic, on && ic === 'bookmark')}<span>${on ? onLabel : label}</span></button>`).join('');
+}
+
 function tile(it) {
   const m = it.mine ?? {};
   const where = services(it);
-  const badge = m.reaction ? BADGE[m.reaction] : m.want ? 'bookmark' : null;
   const sub = it.role || [it.year, it.type === 'tv' ? 'Series' : 'Film'].filter(Boolean).join(' · ');
-  return `<button class="tile" data-key="${keyOf(it)}"${it.role ? ` data-role="${esc(it.role)}"` : ''}>
-    <span class="poster">
+  return `<div class="tile${m.passed ? ' passed' : ''}" data-key="${keyOf(it)}"${it.role ? ` data-role="${esc(it.role)}"` : ''}>
+    <button class="poster" data-open aria-label="${esc(it.title)}: details and where to watch">
       ${it.poster ? `<img loading="lazy" src="${img('w342', it.poster)}" alt="">` : `<span class="noposter">${esc(it.title)}</span>`}
-      ${badge ? `<span class="badge b-${m.reaction ?? 'want'}" title="${m.reaction ? 'You rated this' : 'On your watchlist'}">${icon(badge, true)}</span>` : ''}
       <span class="stamps">${where.length
         ? where.slice(0, 3).map((p) => `<span class="stamp${p.yours ? ' yours' : ''}" title="${esc(p.name)}">${logoImg(p)}</span>`).join('')
           + (where.length > 3 ? `<span class="stamp more">+${where.length - 3}</span>` : '')
         : `<span class="stamp none">${it.rentBuy?.length ? 'Rent/buy' : 'Not streaming'}</span>`}</span>
-    </span>
+    </button>
+    <div class="quick">${quickButtons(m, 'data-quick')}</div>
     <span class="t">${esc(it.title)}</span>
     <span class="y">${esc(sub)}</span>
-  </button>`;
+  </div>`;
 }
 
 // The role under a poster belongs to the actor page it's on, so it's passed
@@ -198,7 +209,8 @@ function titleView(view) {
     it.type === 'tv' ? (it.seasons ? `${it.seasons} season${it.seasons > 1 ? 's' : ''}` : 'Series') : it.runtime ? `${Math.floor(it.runtime / 60)}h ${it.runtime % 60}m` : 'Film',
     it.genres.slice(0, 3).join(', '),
   ].filter(Boolean).join(' · ');
-  const why = m.reaction ? reasonsFor(it, m.reaction, m.reasons) : null;
+  const felt = ['love', 'like', 'dislike'].includes(m.reaction);
+  const why = felt ? reasonsFor(it, m.reaction, m.reasons) : null;
   const rent = it.rentBuy ?? [];
 
   return `<div class="hero">
@@ -229,10 +241,11 @@ function titleView(view) {
 
     <section class="block">
       <h3>Your take</h3>
+      <div class="quick big">${quickButtons(m, 'data-act')}</div>
+      ${m.reaction ? `<p class="why-label">How was it? <span>Optional</span></p>
       <div class="takes">
-        ${REACTIONS.map(([k, label, ic]) => `<button data-act="${k}" class="take ${k}${m.reaction === k ? ' on' : ''}" aria-pressed="${m.reaction === k}">${icon(ic, m.reaction === k)}<span>${label}</span></button>`).join('')}
-        <button data-act="want" class="take want${m.want ? ' on' : ''}" aria-pressed="${!!m.want}">${icon('bookmark', m.want)}<span>${m.want ? 'On watchlist' : 'Watchlist'}</span></button>
-      </div>
+        ${FEELINGS.map(([k, label, ic]) => `<button data-act="${k}" class="take ${k}${m.reaction === k ? ' on' : ''}" aria-pressed="${m.reaction === k}">${icon(ic, m.reaction === k)}<span>${label}</span></button>`).join('')}
+      </div>` : ''}
       ${why ? `<p class="why-label">${m.reaction === 'dislike' ? "What didn't work?" : 'What stood out?'} <span>Tap any that fit</span></p>
       <div class="why">
         ${why.map((r) => `<button data-reason="${esc(r)}" class="${m.reasons.includes(r) ? 'on' : ''}">${esc(r)}</button>`).join('')}
@@ -272,63 +285,67 @@ function personView(view) {
     </section>`;
 }
 
-// --- reacting -------------------------------------------------------------------
-async function saveRating(it, reaction, reasons, note) {
+// --- marking ------------------------------------------------------------------------
+async function saveRating(it, reaction, reasons = [], note = '') {
   return (await api.mark({ list: 'ratings', type: it.type, tmdbId: it.tmdbId, reaction, reasons, note })).mine;
 }
 
-async function onSheet(e) {
-  const top = stack.at(-1);
-  if (!top || top.kind !== 'title' || !e.target.closest('#sheet-body')) return;
-  const it = items.get(top.key);
+// One handler for every mark, from a poster or the detail screen. Tapping an
+// active mark again undoes it.
+async function act(key, what, extra = {}) {
+  const it = items.get(key);
   const m = it.mine ?? { reasons: [], note: '' };
   const ref = { type: it.type, tmdbId: it.tmdbId, imdbId: it.imdbId };
-  const btn = e.target.closest('button');
   let mine;
-  try {
-    if (e.type === 'click' && btn?.dataset.act === 'want') {
-      if (m.want) {
-        api.unmark({ ...ref, list: 'watchlist' });
-        mine = { ...m, want: false };
-      } else {
-        mine = (await api.mark({ ...ref, list: 'watchlist' })).mine;
-        toast('Added to your watchlist.');
-      }
-    } else if (e.type === 'click' && btn?.dataset.act) {
-      const act = btn.dataset.act;
-      if (m.reaction === act) {
-        // Tapping the active reaction again clears it.
-        api.unmark({ ...ref, list: 'ratings' });
-        mine = { ...m, reaction: null, reasons: [], note: '' };
-      } else {
-        // Keep reasons when switching between love and like; they still apply.
-        const same = m.reaction && (m.reaction === 'dislike') === (act === 'dislike');
-        mine = await saveRating(it, act, same ? m.reasons : [], same ? m.note : '');
-      }
-    } else if (e.type === 'click' && btn?.dataset.reason) {
-      const r = btn.dataset.reason;
-      const reasons = m.reasons.includes(r) ? m.reasons.filter((x) => x !== r) : [...m.reasons, r];
-      mine = await saveRating(it, m.reaction, reasons, $('#note')?.value ?? m.note);
-    } else if (e.type === 'change' && e.target.matches('[data-note]')) {
-      mine = await saveRating(it, m.reaction, m.reasons, e.target.value);
-    } else return;
-    const next = { ...it, mine };
-    items.set(top.key, next);
-    renderSheet(true);
-    updateTiles(next);
-    refresh();
-  } catch (err) {
-    toast(err.message);
-  }
+  if (what === 'seen') {
+    if (m.reaction) {
+      api.unmark({ ...ref, list: 'ratings' });
+      mine = { ...m, reaction: null, reasons: [], note: '' };
+    } else mine = await saveRating(it, 'seen');
+  } else if (what === 'want') {
+    if (m.want) {
+      api.unmark({ ...ref, list: 'watchlist' });
+      mine = { ...m, want: false };
+    } else mine = (await api.mark({ ...ref, list: 'watchlist' })).mine;
+  } else if (what === 'pass') {
+    if (m.passed) {
+      api.unmark({ ...ref, list: 'passed' });
+      mine = { ...m, passed: false };
+    } else mine = (await api.mark({ ...ref, list: 'passed' })).mine;
+  } else if (['love', 'like', 'dislike'].includes(what)) {
+    // Tapping the active feeling again goes back to plain "seen".
+    // Reasons carry over between love and like; they still apply.
+    const same = ['love', 'like'].includes(m.reaction) && ['love', 'like'].includes(what);
+    mine = m.reaction === what ? await saveRating(it, 'seen') : await saveRating(it, what, same ? m.reasons : [], same ? m.note : '');
+  } else if (what === 'reason') {
+    const reasons = m.reasons.includes(extra.reason) ? m.reasons.filter((x) => x !== extra.reason) : [...m.reasons, extra.reason];
+    mine = await saveRating(it, m.reaction, reasons, extra.note ?? m.note);
+  } else if (what === 'note') {
+    mine = await saveRating(it, m.reaction, m.reasons, extra.note);
+  } else return;
+  const next = { ...it, mine };
+  items.set(key, next);
+  updateTiles(next);
+  if (stack.at(-1)?.key === key) renderSheet(true);
+  refresh();
 }
-document.addEventListener('click', onSheet);
-document.addEventListener('change', onSheet);
 
-document.addEventListener('click', (e) => {
-  const t = e.target.closest('.tile');
-  if (t) return openSheet({ kind: 'title', key: t.dataset.key });
+document.addEventListener('click', async (e) => {
+  const q = e.target.closest('[data-quick]');
+  const a = e.target.closest('#sheet-body [data-act]');
+  const r = e.target.closest('#sheet-body [data-reason]');
+  try {
+    if (q) return await act(q.closest('.tile').dataset.key, q.dataset.quick);
+    if (a) return await act(stack.at(-1).key, a.dataset.act);
+    if (r) return await act(stack.at(-1).key, 'reason', { reason: r.dataset.reason, note: $('#note')?.value });
+  } catch (err) { return toast(err.message); }
+  const t = e.target.closest('[data-open]');
+  if (t) return openSheet({ kind: 'title', key: t.closest('.tile').dataset.key });
   const p = e.target.closest('[data-person]');
   if (p) return openSheet({ kind: 'person', id: Number(p.dataset.person) });
+});
+document.addEventListener('change', (e) => {
+  if (e.target.matches('#sheet-body [data-note]')) act(stack.at(-1).key, 'note', { note: e.target.value }).catch((err) => toast(err.message));
 });
 $('#sheet-close').addEventListener('click', () => closeSheet());
 $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') closeSheet(true); });
@@ -387,7 +404,7 @@ async function loadBrowse(append = false) {
 }
 
 const legend = () => (status.services.length
-  ? 'Green ring = a service you have. Tap a poster for cast and every way to watch.'
+  ? 'Green ring = a service you have. Seen and passed titles drop off this list next time.'
   : 'Tap a poster for cast and where to watch. Add your services in Settings to see which you already have.');
 
 async function runSearch(q) {
@@ -444,12 +461,11 @@ $('#b-mine').addEventListener('change', () => loadBrowse());
 $('#more').addEventListener('click', () => { browseState.page++; loadBrowse(true); });
 
 // --- my list ----------------------------------------------------------------------
-const LIST_TABS = { want: 'Watchlist', love: 'Loved', like: 'Liked', dislike: 'Not for me' };
+const LIST_TABS = { want: 'Bookmarked', seen: 'Seen', passed: 'Passed' };
 const LIST_EMPTY = {
-  want: 'Nothing on your watchlist yet. Open any poster and tap Watchlist.',
-  love: "Nothing here yet. Open a poster you've seen and tap Loved it.",
-  like: "Nothing here yet. Open a poster you've seen and tap Liked it.",
-  dislike: 'Nothing here yet.',
+  want: 'Nothing bookmarked yet. Tap the bookmark under any poster.',
+  seen: "Nothing marked seen yet. Tap the check under any poster you've watched.",
+  passed: 'Nothing passed yet. Tap the ✕ under anything you never want to see again.',
 };
 let listShow = 'want';
 
@@ -496,7 +512,7 @@ function renderStatus() {
   $('#region').innerHTML = Object.entries(REGIONS).map(([c, n]) => `<option value="${c}" ${c === status.region ? 'selected' : ''}>${n}</option>`).join('');
   $('#key-card').hidden = DEMO || (status.hasKey && !keyRejected);
   $('#key-state').textContent = status.ownKey ? 'Using the key you pasted on this phone. ✓' : '';
-  const total = status.counts.want + status.counts.love + status.counts.like + status.counts.dislike;
+  const total = status.counts.want + status.counts.seen;
   $('#list-count').textContent = total || '';
   if (!status.services.length) $('#b-mine').checked = false;
 }
