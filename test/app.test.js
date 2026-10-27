@@ -66,7 +66,7 @@ const memStore = (key) => {
   };
 };
 
-async function setup(key = 'k') {
+async function setup(key = 'k', builtInKey = null) {
   const mock = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
     calls.push(u);
@@ -78,7 +78,7 @@ async function setup(key = 'k') {
   });
   await new Promise((r) => mock.listen(0, r));
   const store = memStore(key);
-  const api = createApi({ store, base: `http://127.0.0.1:${mock.address().port}` });
+  const api = createApi({ store, base: `http://127.0.0.1:${mock.address().port}`, builtInKey });
   return { api, store, close: () => mock.close() };
 }
 
@@ -226,6 +226,20 @@ test('lists saved by the older version (1-10 ratings) still count', () => {
   store.saved.profile = { ratings: [{ tmdbId: 1, type: 'movie', rating: 9 }], watchlist: [] };
   const api = createApi({ store, base: 'http://127.0.0.1:1' });
   assert.deepEqual(api.status().counts, { want: 0, love: 1, like: 0, dislike: 0 });
+});
+
+test('built-in key works with nothing saved, so no setup is needed', async () => {
+  const { api, store, close } = await setup(null, 'built-in');
+  try {
+    assert.deepEqual([api.status().hasKey, api.status().ownKey], [true, false]);
+    assert.equal((await api.title('movie', 1)).title, 'Vault Job');
+    assert.equal(calls.at(-1).searchParams.get('api_key'), 'built-in');
+    await api.setKey('mine');
+    assert.equal(store.saved.key, 'mine');
+    assert.equal(api.status().ownKey, true);
+    await api.title('movie', 2);
+    assert.equal(calls.at(-1).searchParams.get('api_key'), 'mine', 'a pasted key wins');
+  } finally { close(); }
 });
 
 test('key check, backup and restore', async () => {

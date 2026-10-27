@@ -1,9 +1,9 @@
 // Keeps the app shell available offline. Network first, so a new version
 // shows up on the next open; the cache is only a fallback.
-const CACHE = 'wtw-v5';
+const CACHE = 'wtw-v6';
 const SHELL = [
   './', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-192.png',
-  'lib/api.js', 'lib/browse.js', 'lib/demo.js', 'lib/mine.js', 'lib/reasons.js', 'lib/titles.js', 'lib/tmdb.js',
+  'lib/api.js', 'lib/browse.js', 'lib/config.js', 'lib/demo.js', 'lib/mine.js', 'lib/reasons.js', 'lib/titles.js', 'lib/tmdb.js',
 ];
 
 self.addEventListener('install', (e) => {

@@ -10,12 +10,13 @@ const clean = (s, max) => (typeof s === 'string' ? s.trim().slice(0, max) : '');
 
 // Everything the app does, with no server: the page calls these directly and
 // talks to TMDB itself. `store` persists the profile, key and response cache
-// (localStorage in the browser, memory in tests).
-export function createApi({ store, base, fetchImpl }) {
+// (localStorage in the browser, memory in tests). A key pasted in Settings
+// wins over `builtInKey`.
+export function createApi({ store, base, fetchImpl, builtInKey = null }) {
   const profile = { ...defaultProfile(), ...(store.loadProfile() ?? {}) };
   const cache = store.cache;
   const make = (k) => (k ? createTmdb({ key: k, base, cache, fetchImpl }) : null);
-  let tmdb = make(store.loadKey());
+  let tmdb = make(store.loadKey() || builtInKey);
 
   const needKey = () => tmdb ?? (() => { throw fail('Add your TMDB key in Settings first.'); })();
   const save = () => store.saveProfile(profile);
@@ -39,7 +40,7 @@ export function createApi({ store, base, fetchImpl }) {
         const k = reactionFor(r);
         if (k) counts[k]++;
       }
-      return { hasKey: !!tmdb, region: profile.region, services: profile.services, serviceBrands: profile.serviceBrands, counts };
+      return { hasKey: !!tmdb, ownKey: !!store.loadKey(), region: profile.region, services: profile.services, serviceBrands: profile.serviceBrands, counts };
     },
 
     providers: async (region = profile.region) => done(await needKey().providerList(region.toUpperCase())),

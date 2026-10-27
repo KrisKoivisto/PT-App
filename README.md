@@ -12,12 +12,13 @@ It doesn't log in to any streaming service.
 ## Getting started
 
 1. Open the link on your phone and add it to your home screen (iPhone: Safari, Share, Add to Home Screen).
-2. Settings asks once for a free TMDB key (TMDB is the movie database it looks things up in). The steps are on that screen.
-3. Tick the streaming services you have.
+2. Tick the streaming services you have in Settings.
+
+A TMDB key (TMDB is the movie database it looks things up in) is built in at `public/lib/config.js`, so nothing needs pasting. iPhones keep Safari, home screen apps and in-app browsers in separate storage, so a key saved in one wasn't seen by the others. If TMDB ever stops accepting the built-in key, the app says so and Settings takes a new one.
 
 ## Where your data lives
 
-On your phone, in the browser's storage for this site. There's no server; the app talks straight to TMDB. Use Settings → Save backup now and then.
+On your phone, in the browser's storage for this site. On iPhone, the home screen icon and Safari keep separate copies, so stick to the home screen icon. There's no server; the app talks straight to TMDB. Use Settings → Save backup now and then.
 
 ## How it's built
 

@@ -2,6 +2,7 @@ import { createApi, browserStore, safeStorage } from './lib/api.js';
 import { demoFetch } from './lib/demo.js';
 import { reasonsFor } from './lib/reasons.js';
 import { brand } from './lib/titles.js';
+import { BUILT_IN_KEY } from './lib/config.js';
 
 const $ = (s) => document.querySelector(s);
 const IMG = 'https://image.tmdb.org/t/p';
@@ -37,7 +38,7 @@ if (DEMO && !store.loadKey()) {
   store.saveKey('sample');
   store.saveProfile({ services: [8, 15], serviceBrands: ['netflix', 'hulu'] }); // so the rings show
 }
-const api = createApi({ store, fetchImpl: DEMO ? demoFetch : undefined });
+const api = createApi({ store, fetchImpl: DEMO ? demoFetch : undefined, builtInKey: DEMO ? null : BUILT_IN_KEY });
 const img = (size, path) => (path.startsWith('data:') ? path : `${IMG}/${size}${path}`);
 
 let status;
@@ -55,7 +56,15 @@ function toast(msg) {
   toastTimer = setTimeout(() => { el.hidden = true; }, 3500);
 }
 
+// The key box only shows up if there's no key or TMDB turned the key down.
+let keyRejected = false;
+
 function show(id, msg, isErr) {
+  if (isErr && /rejected the API key/.test(msg)) {
+    keyRejected = true;
+    $('#key-card').hidden = false;
+    msg = "TMDB stopped accepting this app's key. Open Settings to paste a new one.";
+  }
   const el = $(id);
   el.textContent = msg;
   el.className = 'msg' + (isErr ? ' err' : '');
@@ -485,7 +494,8 @@ async function loadProviders() {
 
 function renderStatus() {
   $('#region').innerHTML = Object.entries(REGIONS).map(([c, n]) => `<option value="${c}" ${c === status.region ? 'selected' : ''}>${n}</option>`).join('');
-  $('#key-state').textContent = status.hasKey ? 'Key saved on this phone. ✓' : '';
+  $('#key-card').hidden = DEMO || (status.hasKey && !keyRejected);
+  $('#key-state').textContent = status.ownKey ? 'Using the key you pasted on this phone. ✓' : '';
   const total = status.counts.want + status.counts.love + status.counts.like + status.counts.dislike;
   $('#list-count').textContent = total || '';
   if (!status.services.length) $('#b-mine').checked = false;
@@ -502,6 +512,7 @@ $('#key-form').addEventListener('submit', async (e) => {
   try {
     await api.setKey($('#key').value);
     $('#key').value = '';
+    keyRejected = false;
     show('#key-msg', 'That works. Now tick your streaming services below.');
     refresh();
     await loadProviders();
