@@ -25,10 +25,11 @@ const DB = {
   '/movie/1/credits': { cast: [{ id: 90, name: 'Ann Lee', character: 'Self', profile_path: '/a.jpg' }, ...Array.from({ length: 30 }, (_, i) => ({ id: 100 + i, name: `Extra ${i}`, character: '' }))] },
   '/tv/3/aggregate_credits': { cast: [{ id: 91, name: 'Bo Ray', roles: [{ character: 'Host' }], profile_path: null }] },
   '/person/90': { id: 90, name: 'Ann Lee', profile_path: '/a.jpg', known_for_department: 'Acting', combined_credits: { cast: [
-    { id: 1, media_type: 'movie', character: 'Self', popularity: 5 },
-    { id: 3, media_type: 'tv', character: 'Guest', popularity: 9 },
-    { id: 77, media_type: 'tv', character: 'Herself', popularity: 50, genre_ids: [10767] }, // talk show: dropped
-    { id: 1, media_type: 'movie', character: 'dup', popularity: 1 },
+    { id: 1, media_type: 'movie', character: 'Self', popularity: 5, vote_count: 900 },
+    { id: 3, media_type: 'tv', character: 'Host', popularity: 9, vote_count: 400, episode_count: 12 },
+    { id: 77, media_type: 'tv', character: 'Herself', popularity: 50, vote_count: 5000, genre_ids: [10767], episode_count: 9 }, // talk show
+    { id: 78, media_type: 'tv', character: 'Herself (voice)', popularity: 90, vote_count: 9000, episode_count: 1 }, // one-off cameo
+    { id: 1, media_type: 'movie', character: 'dup', popularity: 1, vote_count: 900 },
   ] } },
   '/search/multi': (u) => ({ results: u.searchParams.get('query') === 'ann lee'
     ? [{ id: 90, media_type: 'person', name: 'Ann Lee', profile_path: '/a.jpg', known_for_department: 'Acting', known_for: [{ id: 1, media_type: 'movie' }] }]
@@ -36,14 +37,19 @@ const DB = {
   '/search/keyword': (u) => ({ results: {
     nurse: [{ id: 500, name: 'nurse' }, { id: 502, name: 'nursery' }],
     killed: [{ id: 9, name: 'killer' }],
+    murder: [{ id: 9826, name: 'murder' }, { id: 386821, name: 'murders' }],
     patient: [{ id: 501, name: 'patient' }],
   }[u.searchParams.get('query')] ?? [] }),
   '/genre/movie/list': { genres: [{ id: 80, name: 'Crime' }, { id: 53, name: 'Thriller' }, { id: 9648, name: 'Mystery' }] },
   '/genre/tv/list': { genres: [{ id: 80, name: 'Crime' }, { id: 9648, name: 'Mystery' }] },
-  '/discover/movie': (u) => (u.searchParams.get('with_keywords') === '500,501'
-    ? { total_pages: 1, results: [{ id: 2, popularity: 5 }] }
-    : { total_pages: 3, results: [{ id: 1, popularity: 50 }, { id: 2, popularity: 10 }] }),
-  '/discover/tv': (u) => (u.searchParams.get('with_keywords') === '500,501'
+  // Topic keywords (500 nurse, 501 patient, 9826 murder): only Con Man is
+  // tagged nurse + patient, and nothing has all three.
+  '/discover/movie': (u) => {
+    const kw = u.searchParams.get('with_keywords') ?? '';
+    if (/\b(500|501|9826)\b/.test(kw)) return { total_pages: 1, results: kw === '500,501' ? [{ id: 2, popularity: 5 }] : [] };
+    return { total_pages: 3, results: [{ id: 1, popularity: 50 }, { id: 2, popularity: 10 }] };
+  },
+  '/discover/tv': (u) => (/\b(500|501|9826)\b/.test(u.searchParams.get('with_keywords') ?? '')
     ? { total_pages: 0, results: [] }
     : { total_pages: 1, results: [{ id: 3, popularity: 80 }] }),
   '/watch/providers/movie': { results: [{ ...NETFLIX, display_priorities: { US: 1 } }] },
@@ -96,12 +102,13 @@ test('a title shows where it streams, rent/buy, and top-billed cast', async () =
   } finally { close(); }
 });
 
-test('an actor page lists their titles, without talk shows or repeats', async () => {
+test('an actor page lists what they are known for, minus guest spots and repeats', async () => {
   const { api, close } = await setup();
   try {
     const p = await api.person(90);
     assert.equal(p.name, 'Ann Lee');
-    assert.deepEqual(p.items.map((i) => [i.title, i.role]), [['Cold Trail', 'Guest'], ['Vault Job', 'Self']]);
+    // Best known (most votes) first; talk shows and one-episode cameos dropped
+    assert.deepEqual(p.items.map((i) => [i.title, i.role]), [['Vault Job', 'Self'], ['Cold Trail', 'Host']]);
   } finally { close(); }
 });
 
@@ -166,8 +173,12 @@ test('search: titles, people with photos, plot words as topics, category shortcu
     assert.deepEqual(r.people, [{ id: 90, name: 'Ann Lee', profile: '/a.jpg', dept: 'Acting' }]);
     assert.deepEqual(r.items.map((i) => i.title), ['Vault Job']);
 
+    calls.length = 0;
     r = await api.search('nurse who killed patients');
-    // "killer" isn't "killed" and "nursery" isn't "nurse": only exact tags count
+    const tried = calls.filter((u) => u.pathname === '/discover/movie').map((u) => u.searchParams.get('with_keywords'));
+    assert.deepEqual(tried, ['500,9826,501', '500,9826', '500,501', '9826,501']);
+    // "killed" maps to the murder tag and "patients" to patient. No title has
+    // all three, so it falls back to the best pair; "nursery" never matches.
     assert.equal(r.topic.label, 'nurse + patient');
     assert.deepEqual(r.topic.items.map((i) => i.title), ['Con Man']);
 

@@ -1,6 +1,7 @@
 import { createApi, browserStore, safeStorage } from './lib/api.js';
 import { demoFetch } from './lib/demo.js';
 import { reasonsFor } from './lib/reasons.js';
+import { brand } from './lib/titles.js';
 
 const $ = (s) => document.querySelector(s);
 const IMG = 'https://image.tmdb.org/t/p';
@@ -34,7 +35,7 @@ const DEMO = !!window.WTW_DEMO || new URLSearchParams(location.search).has('demo
 const store = DEMO ? browserStore(safeStorage(), 'wtw.demo.') : browserStore();
 if (DEMO && !store.loadKey()) {
   store.saveKey('sample');
-  store.saveProfile({ services: [8, 15] }); // Netflix and Hulu, so the rings show
+  store.saveProfile({ services: [8, 15], serviceBrands: ['netflix', 'hulu'] }); // so the rings show
 }
 const api = createApi({ store, fetchImpl: DEMO ? demoFetch : undefined });
 const img = (size, path) => (path.startsWith('data:') ? path : `${IMG}/${size}${path}`);
@@ -60,13 +61,12 @@ function show(id, msg, isErr) {
   el.className = 'msg' + (isErr ? ' err' : '');
 }
 
-// Streaming (and free) services for a title, yours first.
+// Streaming (and free) services for a title, one per brand, yours first.
 function services(it) {
-  const have = new Set(status.services);
   const seen = new Set();
   return [...it.stream, ...it.free]
-    .filter((p) => !seen.has(p.id) && seen.add(p.id))
-    .map((p) => ({ ...p, yours: have.has(p.id) }))
+    .filter((p) => !seen.has(brand(p.name)) && seen.add(brand(p.name)))
+    .map((p) => ({ ...p, yours: status.services.includes(p.id) || status.serviceBrands.includes(brand(p.name)) }))
     .sort((a, b) => Number(b.yours) - Number(a.yours));
 }
 
@@ -477,7 +477,7 @@ async function loadProviders() {
   try {
     const list = await api.providers(status.region);
     $('#providers').innerHTML = list.slice(0, 60).map((p) => `<label class="prov" title="${esc(p.name)}">
-      <input type="checkbox" value="${p.id}" ${status.services.includes(p.id) ? 'checked' : ''}>
+      <input type="checkbox" value="${p.id}" data-name="${esc(p.name)}" ${status.services.includes(p.id) ? 'checked' : ''}>
       ${p.logo ? `<img src="${img('w92', p.logo)}" alt="">` : ''}<span>${esc(p.name)}</span></label>`).join('');
     show('#settings-msg', '');
   } catch (e) { show('#settings-msg', e.message, true); }
@@ -511,8 +511,8 @@ $('#key-form').addEventListener('submit', async (e) => {
 });
 
 $('#providers').addEventListener('change', () => {
-  const svc = [...document.querySelectorAll('#providers input:checked')].map((i) => Number(i.value));
-  api.settings({ services: svc });
+  const checked = [...document.querySelectorAll('#providers input:checked')];
+  api.settings({ services: checked.map((i) => Number(i.value)), serviceNames: checked.map((i) => i.dataset.name) });
   refresh();
 });
 $('#region').addEventListener('change', async () => {
@@ -553,7 +553,7 @@ $('#reset').addEventListener('click', () => {
   clearTimeout(resetArmed);
   resetArmed = null;
   btn.textContent = 'Delete my list';
-  const keep = { region: status.region, services: status.services };
+  const keep = { region: status.region, services: status.services, serviceNames: status.serviceBrands };
   api.reset();
   api.settings(keep); // the list goes; your country and services stay
   toast('Your list is deleted.');

@@ -72,10 +72,10 @@ async function querySets(tmdb, cat, sub, type) {
 // Turn bare TMDB ids into full items with where-to-watch.
 export async function detail(tmdb, profile, list) {
   const rows = await pool(list, CONCURRENCY, async ({ type, id }) => {
-    const d = await tmdb.details(type, id);
+    const d = await tmdb.details(type, id, profile.region);
     if (!d) return null;
     const item = shape(type, d, profile.region);
-    return { ...item, services: matchServices(item, new Set(profile.services)) };
+    return { ...item, services: matchServices(item, profile) };
   });
   return rows.filter(Boolean);
 }
@@ -116,7 +116,10 @@ export async function browse(tmdb, profile, { category, sub = null, page = 1, on
 }
 
 // --- search ------------------------------------------------------------------
-const STOP = new Set('a an and are about at be by for from has have he her his how i in is it its me movie movies my of on or one show shows series she that the their them there they this to was were what when where which who with about'.split(' '));
+// Filler words, plus generic people-words ("woman", "guy") that match huge,
+// unrelated tags and drown out the specific ones.
+const STOP = new Set(('a an and are about at be by for from has have he her his how i in is it its me movie movies my of on or one show shows series she that the their them there they this to was were what when where which who with about '
+  + 'guy guys man men woman women girl girls boy boys lady person people someone somebody').split(' '));
 
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9' -]/g, ' ').replace(/\s+/g, ' ').trim();
 const hasPhrase = (q, phrase) => ` ${q} `.includes(` ${phrase} `);
@@ -136,24 +139,57 @@ export function matchCategories(q) {
   return out.slice(0, 6);
 }
 
-// Words from a half-remembered description -> TMDB keyword ids, matched
-// exactly (or by singular) so "nurse killed patients" finds the "nurse" tag
-// and doesn't drift to "nursery".
+// How people describe a crime vs. how TMDB tags it ("killed" -> murder).
+const SYNONYMS = {
+  kill: 'murder', killed: 'murder', kills: 'murder', killing: 'murder', killings: 'murder',
+  murdered: 'murder', murders: 'murder', murdering: 'murder', murderer: 'murder',
+  robbed: 'robbery', rob: 'robbery', robs: 'robbery', stole: 'theft', stolen: 'theft', steal: 'theft',
+  scam: 'fraud', scammed: 'fraud', scams: 'fraud', conned: 'con man',
+  kidnapped: 'kidnapping', abducted: 'kidnapping', poisoned: 'poison', poisoning: 'poison',
+  disappeared: 'disappearance', vanished: 'disappearance', cheating: 'infidelity', cheated: 'infidelity',
+};
+
+// Words from a half-remembered description -> TMDB keywords, matched
+// exactly so "nurse" finds the nurse tag and not "nursery". Singular forms
+// are tried first: TMDB has "patient" on far more titles than "patients".
 async function topicKeywords(tmdb, q) {
-  const n = norm(q);
   const exact = async (word) => {
-    // Try the word as typed, then its singular ("patients" -> "patient").
-    const forms = [...new Set([word, word.replace(/ies$/, 'y'), word.replace(/s$/, '')])];
+    const forms = [...new Set([SYNONYMS[word], word.replace(/ies$/, 'y'), word.replace(/s$/, ''), word].filter(Boolean))];
     for (const f of forms) {
-      const hit = (await tmdb.keywords(f)).find((k) => forms.includes(k.name.toLowerCase()));
+      const hit = (await tmdb.keywords(f)).find((k) => k.name.toLowerCase() === f);
       if (hit) return hit;
     }
     return null;
   };
+  const n = norm(q);
   const whole = n.split(' ').length > 1 ? await exact(n) : null;
   if (whole) return [whole];
-  const words = [...new Set(n.split(' ').filter((w) => w.length >= 3 && !STOP.has(w)))].slice(0, 5);
-  return (await Promise.all(words.map(exact))).filter(Boolean);
+  const words = [...new Set(n.split(' ').filter((w) => w.length >= 3 && !STOP.has(w)))].slice(0, 4);
+  const found = (await Promise.all(words.map(exact))).filter(Boolean);
+  return [...new Map(found.map((k) => [k.id, k])).values()];
+}
+
+// Pick-n-of combinations, largest first.
+const combos = (list, size) => (size === 0 ? [[]] : list.flatMap((x, i) => combos(list.slice(i + 1), size - 1).map((c) => [x, ...c])));
+
+// Titles tagged with all of the keywords; if that finds nothing, drop one
+// keyword at a time (never below two, unless there was only one).
+async function topicTitles(tmdb, kws) {
+  for (let size = kws.length; size >= Math.min(2, kws.length); size--) {
+    const found = new Map();
+    let used = [];
+    for (const set of combos(kws, size)) {
+      const params = { with_keywords: set.map((k) => k.id).join(','), sort_by: 'popularity.desc' };
+      const before = found.size;
+      await Promise.all(['movie', 'tv'].map(async (t) => {
+        const r = await tmdb.discover(t, params);
+        for (const x of (r?.results ?? []).slice(0, 10)) found.set(`${t}:${x.id}`, { type: t, id: x.id, rank: x.popularity ?? 0 });
+      }));
+      if (found.size > before) used = [...new Set([...used, ...set])];
+    }
+    if (found.size) return { kws: used, list: [...found.values()].sort((a, b) => b.rank - a.rank) };
+  }
+  return null;
 }
 
 export async function search(tmdb, profile, q) {
@@ -167,16 +203,11 @@ export async function search(tmdb, profile, q) {
   const meaningful = norm(q).split(' ').filter((w) => w.length >= 3 && !STOP.has(w));
   if (items.length < 6 || meaningful.length >= 2) {
     const kws = await topicKeywords(tmdb, q);
-    if (kws.length) {
-      const params = { with_keywords: kws.map((k) => k.id).join(','), sort_by: 'popularity.desc' };
-      const found = [];
-      await Promise.all(['movie', 'tv'].map(async (t) => {
-        const r = await tmdb.discover(t, params);
-        for (const x of (r?.results ?? []).slice(0, 8)) found.push({ type: t, id: x.id, rank: x.popularity });
-      }));
+    const hit = kws.length ? await topicTitles(tmdb, kws) : null;
+    if (hit) {
       const have = new Set(items.map((i) => `${i.type}:${i.tmdbId}`));
-      const list = found.filter((f) => !have.has(`${f.type}:${f.id}`)).sort((a, b) => b.rank - a.rank).slice(0, 12);
-      if (list.length) topic = { label: kws.map((k) => k.name).join(' + '), items: await detail(tmdb, profile, list) };
+      const list = hit.list.filter((f) => !have.has(`${f.type}:${f.id}`)).slice(0, 12);
+      if (list.length) topic = { label: hit.kws.map((k) => k.name).join(' + '), items: await detail(tmdb, profile, list) };
     }
   }
   return { suggestions, people, items, topic };

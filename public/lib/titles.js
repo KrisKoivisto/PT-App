@@ -23,10 +23,26 @@ export function shape(type, d, region) {
   };
 }
 
-// Services the user has that stream this title.
-export function matchServices(item, wanted) {
+// TMDB lists ad tiers and add-on channels as separate services ("Netflix
+// Standard with Ads", "HBO Max Amazon Channel"). This folds them into one
+// brand so Netflix shows once and counts as yours either way.
+export function brand(name = '') {
+  return name.toLowerCase()
+    .replace(/\+/g, ' plus')
+    .replace(/\s+(amazon channel|apple tv channel|roku premium channel)$/, '')
+    .replace(/\s+(standard )?with ads$/, '')
+    .replace(/\s+(premium plus|premium|essential|basic)$/, '')
+    .replace(/^hbo max$/, 'max')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const yours = (p, profile) => profile.services.includes(p.id) || (profile.serviceBrands ?? []).includes(brand(p.name));
+
+// Services the user has that stream this title, one per brand.
+export function matchServices(item, profile) {
   const seen = new Set();
-  return [...item.stream, ...item.free].filter((p) => wanted.has(p.id) && !seen.has(p.id) && seen.add(p.id));
+  return [...item.stream, ...item.free].filter((p) => yours(p, profile) && !seen.has(brand(p.name)) && seen.add(brand(p.name)));
 }
 
 export function seenSet(items) {

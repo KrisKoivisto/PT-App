@@ -1,9 +1,9 @@
 import { createTmdb, pool } from './tmdb.js';
-import { shape, matchServices } from './titles.js';
+import { shape, matchServices, brand } from './titles.js';
 import { browse, search, detail, CATEGORIES, TRUE_CRIME_SUBS } from './browse.js';
 import { REACTIONS, reactionOf, annotate } from './mine.js';
 
-export const defaultProfile = () => ({ region: 'US', services: [], ratings: [], watchlist: [] });
+export const defaultProfile = () => ({ region: 'US', services: [], serviceBrands: [], ratings: [], watchlist: [] });
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const clean = (s, max) => (typeof s === 'string' ? s.trim().slice(0, max) : '');
@@ -39,14 +39,18 @@ export function createApi({ store, base, fetchImpl }) {
         const k = reactionFor(r);
         if (k) counts[k]++;
       }
-      return { hasKey: !!tmdb, region: profile.region, services: profile.services, counts };
+      return { hasKey: !!tmdb, region: profile.region, services: profile.services, serviceBrands: profile.serviceBrands, counts };
     },
 
     providers: async (region = profile.region) => done(await needKey().providerList(region.toUpperCase())),
 
     settings(body) {
       if (typeof body.region === 'string' && /^[A-Za-z]{2}$/.test(body.region)) profile.region = body.region.toUpperCase();
-      if (Array.isArray(body.services)) profile.services = body.services.map(Number).filter(Number.isInteger);
+      if (Array.isArray(body.services)) {
+        profile.services = body.services.map(Number).filter(Number.isInteger);
+        // Names too, so "Netflix Standard with Ads" counts when you ticked Netflix.
+        profile.serviceBrands = (Array.isArray(body.serviceNames) ? body.serviceNames : []).map((n) => brand(String(n))).filter(Boolean);
+      }
       save();
       return { ok: true };
     },
@@ -108,12 +112,11 @@ export function createApi({ store, base, fetchImpl }) {
         ? profile.watchlist
         : profile.ratings.filter((i) => reactionFor(i) === show);
       const t = needKey();
-      const wanted = new Set(profile.services);
       const items = (await pool(src.filter((i) => i.tmdbId).reverse(), 8, async (i) => {
-        const d = await t.details(i.type, i.tmdbId);
+        const d = await t.details(i.type, i.tmdbId, profile.region);
         if (!d) return null;
         const item = shape(i.type, d, profile.region);
-        return { ...item, services: matchServices(item, wanted) };
+        return { ...item, services: matchServices(item, profile) };
       })).filter(Boolean);
       return done({ items: annotate(profile, items) });
     },
@@ -126,7 +129,7 @@ export function createApi({ store, base, fetchImpl }) {
         throw fail('Bad title.');
       }
       if (list === 'ratings' && !REACTIONS[body.reaction]) throw fail('Pick how you felt about it.');
-      const d = await needKey().details(type, tmdbId);
+      const d = await needKey().details(type, tmdbId, profile.region);
       if (!d) throw fail('TMDB has no such title.', 404);
       const item = {
         imdbId: d.external_ids?.imdb_id || null,
@@ -169,6 +172,7 @@ export function createApi({ store, base, fetchImpl }) {
       Object.assign(profile, defaultProfile(), {
         region: typeof p.region === 'string' ? p.region : 'US',
         services: Array.isArray(p.services) ? p.services : [],
+        serviceBrands: Array.isArray(p.serviceBrands) ? p.serviceBrands : [],
         ratings: Array.isArray(p.ratings) ? p.ratings : [],
         watchlist: Array.isArray(p.watchlist) ? p.watchlist : [],
       });

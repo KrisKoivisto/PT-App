@@ -1,3 +1,5 @@
+import { brand } from './titles.js';
+
 const TTL = 3 * 24 * 60 * 60 * 1000;
 
 // TMDB client. Accepts either the v3 api key or the v4 read-access token (a JWT,
@@ -7,11 +9,11 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
 
   // `shrink` trims a big response before it's cached, so cast lists and
   // filmographies don't eat the phone's storage.
-  async function get(pathname, params = {}, shrink = (v) => v) {
+  async function get(pathname, params = {}, shrink = (v) => v, tag = '') {
     const url = new URL(base + pathname);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
     if (!isToken) url.searchParams.set('api_key', key);
-    const cacheKey = pathname + '?' + [...url.searchParams].filter(([k]) => k !== 'api_key').join('&');
+    const cacheKey = pathname + '?' + [...url.searchParams].filter(([k]) => k !== 'api_key').join('&') + tag;
 
     const hit = cache?.data[cacheKey];
     if (hit && Date.now() - hit.t < TTL) return hit.v;
@@ -71,15 +73,17 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
       }));
     },
 
-    // A person and what they're in, most popular first. Talk shows and news
-    // are dropped: an actor's guest spots there aren't what you're after.
+    // A person and what they're known for, best-known first. Guest spots
+    // (talk shows, news, a TV episode or two) are dropped, and fame is ranked
+    // by vote count: popularity puts a one-line Simpsons cameo above a lead.
     person(id) {
       return get(`/person/${id}`, { append_to_response: 'combined_credits' }, (r) => {
         const seen = new Set();
         const credits = (r?.combined_credits?.cast ?? [])
           .filter((c) => (c.media_type === 'movie' || c.media_type === 'tv')
-            && !(c.genre_ids ?? []).some((g) => g === 10767 || g === 10763))
-          .sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0))
+            && !(c.genre_ids ?? []).some((g) => g === 10767 || g === 10763)
+            && !(c.media_type === 'tv' && (c.episode_count ?? 0) < 3))
+          .sort((a, b) => (b.vote_count ?? 0) - (a.vote_count ?? 0))
           .filter((c) => { const k = `${c.media_type}:${c.id}`; return !seen.has(k) && seen.add(k); })
           .slice(0, 30)
           .map((c) => ({ type: c.media_type, id: c.id, character: c.character ?? '' }));
@@ -102,27 +106,33 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
       return r?.genres ?? [];
     },
 
-    // details + providers + imdb id in one request
-    details: (type, id) =>
-      get(`/${type}/${id}`, { append_to_response: 'watch/providers,external_ids' }),
+    // Details, where to watch and the IMDb id in one request. TMDB sends
+    // streaming data for every country (30-75 KB a title), so only `region`
+    // is kept; otherwise the cache would outgrow the phone's storage.
+    details: (type, id, region = 'US') =>
+      get(`/${type}/${id}`, { append_to_response: 'watch/providers,external_ids' }, (d) => d && {
+        id: d.id, title: d.title, name: d.name, release_date: d.release_date, first_air_date: d.first_air_date,
+        overview: d.overview, poster_path: d.poster_path, backdrop_path: d.backdrop_path, genres: d.genres,
+        runtime: d.runtime, episode_run_time: d.episode_run_time, number_of_seasons: d.number_of_seasons,
+        vote_average: d.vote_average, vote_count: d.vote_count,
+        external_ids: { imdb_id: d.external_ids?.imdb_id ?? null },
+        'watch/providers': { results: { [region]: d['watch/providers']?.results?.[region] } },
+      }, `#${region}`),
 
     async providerList(region) {
       const [m, t] = await Promise.all([
         get('/watch/providers/movie', { watch_region: region }),
         get('/watch/providers/tv', { watch_region: region }),
       ]);
-      const byId = new Map();
-      for (const p of [...(m?.results ?? []), ...(t?.results ?? [])]) {
-        if (!byId.has(p.provider_id)) {
-          byId.set(p.provider_id, {
-            id: p.provider_id,
-            name: p.provider_name,
-            logo: p.logo_path,
-            priority: p.display_priorities?.[region] ?? p.display_priority ?? 999,
-          });
-        }
-      }
-      return [...byId.values()].sort((a, b) => a.priority - b.priority);
+      // One entry per brand, shown under its plain name ("HBO Max", not
+      // "HBO Max Amazon Channel") when TMDB has one.
+      const variant = (n) => /channel$|with ads$/i.test(n);
+      const all = [...(m?.results ?? []), ...(t?.results ?? [])]
+        .map((p) => ({ id: p.provider_id, name: p.provider_name, logo: p.logo_path, priority: p.display_priorities?.[region] ?? p.display_priority ?? 999 }))
+        .sort((a, b) => Number(variant(a.name)) - Number(variant(b.name)) || a.priority - b.priority);
+      const byBrand = new Map();
+      for (const p of all) if (!byBrand.has(brand(p.name))) byBrand.set(brand(p.name), p);
+      return [...byBrand.values()].sort((a, b) => a.priority - b.priority);
     },
   };
 }

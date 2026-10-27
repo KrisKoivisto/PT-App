@@ -155,7 +155,7 @@ function discover(type, q) {
 
 function filmography(p) {
   return TITLES.filter((t) => t.cast.some(([id]) => id === p.id))
-    .map((t) => ({ ...brief(t), character: t.cast.find(([id]) => id === p.id)[1], genre_ids: t.genres }));
+    .map((t) => ({ ...brief(t), character: t.cast.find(([id]) => id === p.id)[1], genre_ids: t.genres, vote_count: t.pop * 10, episode_count: t.type === 'tv' ? 6 : undefined }));
 }
 
 function search(query) {
