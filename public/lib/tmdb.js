@@ -99,6 +99,8 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
     // Cheap call that fails with 401 on a bad key.
     verify: () => get('/configuration'),
 
+    recommendations: (type, id) => get(`/${type}/${id}/recommendations`),
+
     discover: (type, params) => get(`/discover/${type}`, { include_adult: 'false', ...params }),
 
     async genres(type) {
@@ -110,14 +112,16 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
     // streaming data for every country (30-75 KB a title), so only `region`
     // is kept; otherwise the cache would outgrow the phone's storage.
     details: (type, id, region = 'US') =>
-      get(`/${type}/${id}`, { append_to_response: 'watch/providers,external_ids' }, (d) => d && {
+      get(`/${type}/${id}`, { append_to_response: 'watch/providers,external_ids,keywords' }, (d) => d && {
         id: d.id, title: d.title, name: d.name, release_date: d.release_date, first_air_date: d.first_air_date,
         overview: d.overview, poster_path: d.poster_path, backdrop_path: d.backdrop_path, genres: d.genres,
         runtime: d.runtime, episode_run_time: d.episode_run_time, number_of_seasons: d.number_of_seasons,
-        vote_average: d.vote_average, vote_count: d.vote_count,
+        vote_average: d.vote_average, vote_count: d.vote_count, type: d.type,
         external_ids: { imdb_id: d.external_ids?.imdb_id ?? null },
+        // Movies send keywords.keywords, TV sends keywords.results.
+        keywords: (d.keywords?.keywords ?? d.keywords?.results ?? []).map((k) => ({ id: k.id, name: k.name })),
         'watch/providers': { results: { [region]: d['watch/providers']?.results?.[region] } },
-      }, `#${region}`),
+      }, `#${region}#2`),
 
     async providerList(region) {
       const [m, t] = await Promise.all([

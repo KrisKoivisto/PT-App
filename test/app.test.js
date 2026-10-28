@@ -342,6 +342,46 @@ test('sample mode works end to end with no network', async () => {
   assert.deepEqual(r.people.map((x) => x.name), ['Ray Castellano']);
 });
 
+test('Movies / Shows / Limited series toggle', async () => {
+  const api = createApi({ store: memStore('sample'), fetchImpl: demoFetch });
+  const titles = async (kind) => {
+    api.settings({ kind });
+    return (await api.browse({ category: 'true-crime' })).items.map((i) => `${i.type}:${i.tvType ?? '-'}`);
+  };
+  assert.ok((await titles('all')).some((t) => t.startsWith('movie')) && (await titles('all')).some((t) => t.startsWith('tv')));
+  assert.ok((await titles('movie')).every((t) => t.startsWith('movie')));
+  assert.deepEqual([...new Set(await titles('limited'))], ['tv:Miniseries']);
+  const shows = await titles('show');
+  assert.ok(shows.length && shows.every((t) => t.startsWith('tv') && t !== 'tv:Miniseries'));
+  assert.equal(api.status().kind, 'show');
+
+  // Search keeps to the toggle too, and says how many it hid
+  api.settings({ kind: 'movie' });
+  const r = await api.search('heist');
+  assert.ok(r.items.every((i) => i.type === 'movie'));
+  assert.equal(r.hiddenByKind, 1, 'Heist Week is a show');
+  api.settings({ kind: 'nonsense' });
+  assert.equal(api.status().kind, 'movie', 'ignores unknown kinds');
+});
+
+test('more like this: shared story tags, best first, nothing vague, nothing you marked', async () => {
+  const api = createApi({ store: memStore('sample'), fetchImpl: demoFetch });
+  let r = await api.similar('movie', 101); // The Vault Under Fifth Street: true crime, heist, bank heist
+  assert.equal(r.title, 'The Vault Under Fifth Street');
+  assert.equal(r.items[0].title, 'Heist Week');
+  assert.deepEqual(r.items[0].because.sort(), ['heist', 'true crime']);
+  assert.ok(!r.items.some((i) => ['Laugh Track', 'The Last Laugh Tour', 'Small Town Secrets'].includes(i.title)), 'no unrelated titles');
+  assert.ok(r.items.every((i) => i.because.length >= 2), 'every match shares at least two story tags');
+
+  await api.mark({ list: 'passed', type: 'tv', tmdbId: 112 });
+  r = await api.similar('movie', 101);
+  assert.ok(!r.items.some((i) => i.title === 'Heist Week'), 'marked titles are left out');
+
+  api.settings({ kind: 'movie' });
+  r = await api.similar('tv', 102);
+  assert.ok(r.items.every((i) => i.type === 'movie'));
+});
+
 test('static server serves the app and nothing outside it', async () => {
   const server = createServer();
   await new Promise((r) => server.listen(0, r));

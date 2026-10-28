@@ -116,6 +116,10 @@ function brief(t) {
   };
 }
 
+// TV kinds, as TMDB labels them; the rest are documentary series.
+const TV_TYPE = { 102: 'Miniseries', 105: 'Miniseries', 115: 'Scripted' };
+const TYPE_NUM = { Documentary: 0, Miniseries: 2, Scripted: 4 };
+
 function details(t) {
   return {
     ...brief(t),
@@ -126,7 +130,9 @@ function details(t) {
     runtime: t.runtime ?? null,
     number_of_seasons: t.seasons ?? null,
     vote_count: 800,
+    type: t.type === 'tv' ? TV_TYPE[t.id] ?? 'Documentary' : undefined,
     external_ids: { imdb_id: null },
+    keywords: { [t.type === 'tv' ? 'results' : 'keywords']: t.kw.map((id) => ({ id, name: KEYWORDS[id] })) },
     'watch/providers': {
       results: { US: { flatrate: t.on.map((k) => P[k]), rent: (t.rent ?? []).map((k) => P[k]) } },
     },
@@ -141,16 +147,18 @@ function matchesIds(spec, have) {
 }
 
 function discover(type, q) {
-  if (Number(q.get('page') || 1) > 1) return { page: 2, total_pages: 1, results: [] };
+  if (Number(q.get('page') || 1) > 1) return { page: 2, total_pages: 1, total_results: 0, results: [] };
+  const types = q.get('with_type')?.split('|').map(Number);
   const providers = q.get('with_watch_providers')?.split('|').map(Number);
   let list = TITLES.filter((t) => t.type === type
     && matchesIds(q.get('with_keywords'), t.kw)
     && matchesIds(q.get('with_genres'), t.genres)
-    && (!providers || t.on.some((k) => providers.includes(P[k].provider_id))));
+    && (!providers || t.on.some((k) => providers.includes(P[k].provider_id)))
+    && (!types || types.includes(TYPE_NUM[TV_TYPE[t.id] ?? 'Documentary'])));
   const sort = q.get('sort_by') ?? '';
   const key = sort.startsWith('vote') ? (t) => t.vote : sort.includes('date') ? (t) => t.year : (t) => t.pop;
   list = list.sort((a, b) => key(b) - key(a));
-  return { page: 1, total_pages: 1, results: list.map(brief) };
+  return { page: 1, total_pages: 1, total_results: list.length, results: list.map(brief) };
 }
 
 function filmography(p) {

@@ -14,6 +14,9 @@ export function shape(type, d, region) {
     genres: (d.genres ?? []).map((g) => g.name),
     runtime: d.runtime ?? d.episode_run_time?.[0] ?? null,
     seasons: d.number_of_seasons ?? null,
+    // TMDB's TV type: Scripted, Miniseries, Documentary, Reality...
+    tvType: type === 'tv' ? d.type ?? null : null,
+    keywords: d.keywords ?? [],
     voteAverage: d.vote_average,
     voteCount: d.vote_count,
     stream: pick(p.flatrate),

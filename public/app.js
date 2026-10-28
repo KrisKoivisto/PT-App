@@ -49,12 +49,14 @@ const esc = (s = '') => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<
 const keyOf = (it) => `${it.type}:${it.tmdbId}`;
 
 let toastTimer;
-function toast(msg) {
+// Brief message at the bottom; with `onUndo` it carries an Undo button.
+function toast(msg, onUndo) {
   const el = $('#toast');
-  el.textContent = msg;
+  el.innerHTML = `<span>${esc(msg)}</span>${onUndo ? '<button type="button" class="undo">Undo</button>' : ''}`;
+  if (onUndo) el.querySelector('.undo').onclick = () => { el.hidden = true; onUndo(); };
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 3500);
+  toastTimer = setTimeout(() => { el.hidden = true; }, onUndo ? 5000 : 3500);
 }
 
 // The key box only shows up if there's no key or TMDB turned the key down.
@@ -99,7 +101,7 @@ function quickButtons(m, attr) {
 function tile(it) {
   const m = it.mine ?? {};
   const where = services(it);
-  const sub = it.role || [it.year, it.type === 'tv' ? 'Series' : 'Film'].filter(Boolean).join(' · ');
+  const sub = it.role || [it.year, it.type === 'movie' ? 'Film' : it.tvType === 'Miniseries' ? 'Limited series' : 'Series'].filter(Boolean).join(' · ');
   return `<div class="tile${m.passed ? ' passed' : ''}" data-key="${keyOf(it)}"${it.role ? ` data-role="${esc(it.role)}"` : ''}>
     <button class="poster" data-open aria-label="${esc(it.title)}: details and where to watch">
       ${it.poster ? `<img loading="lazy" src="${img('w342', it.poster)}" alt="">` : `<span class="noposter">${esc(it.title)}</span>`}
@@ -175,7 +177,7 @@ function renderSheet(keepScroll = false) {
   document.body.classList.add('locked');
   $('#sheet-close').innerHTML = stack.length > 1 ? icon('back') : icon('x');
   $('#sheet-close').setAttribute('aria-label', stack.length > 1 ? 'Back' : 'Close');
-  $('#sheet-body').innerHTML = top.kind === 'title' ? titleView(top) : personView(top);
+  $('#sheet-body').innerHTML = top.kind === 'title' ? titleView(top) : top.kind === 'similar' ? similarView(top) : personView(top);
   panel.scrollTop = keepScroll ? scroll : 0;
   if (!top.loaded && !top.loading) load(top);
 }
@@ -188,6 +190,10 @@ async function load(view) {
       const r = await api.title(type, Number(id));
       view.cast = r.cast;
       remember(r);
+    } else if (view.kind === 'similar') {
+      const [type, id] = view.key.split(':');
+      view.similar = await api.similar(type, Number(id));
+      view.similar.items.forEach(remember);
     } else {
       view.person = await api.person(view.id);
       view.person.items.forEach(remember);
@@ -266,7 +272,25 @@ function titleView(view) {
         </button>`).join('')}</div>` : '<p class="msg">No cast listed.</p>')
       : view.error ? `<p class="msg err">${esc(view.error)}</p>` : '<p class="msg">Loading cast…</p>'}
     </section>
+    <section class="block">
+      <button class="more-like" data-similar>More like this <span>Matched on what it's actually about</span></button>
+    </section>
     ${it.imdbId ? `<p class="imdb"><a href="https://www.imdb.com/title/${it.imdbId}/" target="_blank" rel="noopener">Open on IMDb ›</a></p>` : ''}`;
+}
+
+function similarView(view) {
+  const src = items.get(view.key);
+  const r = view.similar;
+  const head = `<div class="similar-head">
+      <p class="eyebrow">More like</p>
+      <h2>${esc(src?.title ?? '')}</h2>
+      <p class="meta">Titles that share what this one is about. The tags they share are under each poster.</p>
+    </div>`;
+  if (!r) return head + (view.error ? `<p class="msg err pad-x">${esc(view.error)}</p>` : '<p class="msg pad-x">Finding titles about the same things…</p>');
+  if (!r.items.length) {
+    return head + `<p class="msg pad-x">No close matches${status.kind !== 'all' ? ' with the Movies / Shows / Limited filter you have on' : ''}. TMDB doesn't have enough detail on this one to be sure, and a vague list isn't worth your time.</p>`;
+  }
+  return head + `<section class="block"><div class="wall" data-clear>${r.items.map((i) => tile({ ...inView(i), role: i.because.join(' · ') })).join('')}</div></section>`;
 }
 
 function personView(view) {
@@ -328,6 +352,55 @@ async function act(key, what, extra = {}) {
   updateTiles(next);
   if (stack.at(-1)?.key === key) renderSheet(true);
   refresh();
+  return { prev: m, next: mine };
+}
+
+const DONE_MSG = { seen: 'Marked seen.', want: 'Bookmarked.', pass: 'Passed.' };
+
+// Seen, bookmark or pass from a poster: the title leaves the Find screen (and
+// a More like this list), everything below moves up, and Undo puts it back.
+// On My list it leaves the tab it no longer belongs to.
+async function quick(key, what) {
+  const { prev, next } = await act(key, what);
+  const marked = next.reaction || next.want || next.passed;
+  const belongs = { want: next.want, seen: !!next.reaction, passed: next.passed }[listShow];
+  const leaving = [...document.querySelectorAll(`.tile[data-key="${key}"]`)].filter((el) =>
+    (el.closest('[data-clear]') && marked) || (el.closest('#list-grid') && !belongs));
+  if (!leaving.length) return;
+  const spots = leaving.map((el) => ({ wall: el.parentElement, before: el.nextElementSibling, role: el.dataset.role }));
+  leaving.forEach(removeTile);
+  topUp();
+  toast(marked ? DONE_MSG[what] : 'Removed.', async () => {
+    await restore(key, prev);
+    for (const { wall, before, role } of spots) {
+      if (!wall.isConnected) continue;
+      const html = tile({ ...items.get(key), role });
+      if (before?.isConnected) before.insertAdjacentHTML('beforebegin', html);
+      else wall.insertAdjacentHTML('beforeend', html);
+    }
+  });
+}
+
+function removeTile(el) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return el.remove();
+  el.classList.add('leaving');
+  setTimeout(() => el.remove(), 200);
+}
+
+// Put a title's marks back exactly as they were before.
+async function restore(key, prev) {
+  const it = items.get(key);
+  const ref = { type: it.type, tmdbId: it.tmdbId, imdbId: it.imdbId };
+  for (const list of ['ratings', 'watchlist', 'passed']) api.unmark({ ...ref, list });
+  let mine = { reaction: null, reasons: [], note: '', want: false, passed: false };
+  if (prev.reaction) mine = await saveRating(it, prev.reaction, prev.reasons, prev.note);
+  if (prev.want) mine = (await api.mark({ ...ref, list: 'watchlist' })).mine;
+  if (prev.passed) mine = (await api.mark({ ...ref, list: 'passed' })).mine;
+  const back = { ...it, mine };
+  items.set(key, back);
+  updateTiles(back);
+  if (stack.at(-1)?.key === key) renderSheet(true);
+  refresh();
 }
 
 document.addEventListener('click', async (e) => {
@@ -335,12 +408,13 @@ document.addEventListener('click', async (e) => {
   const a = e.target.closest('#sheet-body [data-act]');
   const r = e.target.closest('#sheet-body [data-reason]');
   try {
-    if (q) return await act(q.closest('.tile').dataset.key, q.dataset.quick);
-    if (a) return await act(stack.at(-1).key, a.dataset.act);
+    if (q) return await quick(q.closest('.tile').dataset.key, q.dataset.quick);
+    if (a) return await (['seen', 'want', 'pass'].includes(a.dataset.act) ? quick : act)(stack.at(-1).key, a.dataset.act);
     if (r) return await act(stack.at(-1).key, 'reason', { reason: r.dataset.reason, note: $('#note')?.value });
   } catch (err) { return toast(err.message); }
   const t = e.target.closest('[data-open]');
   if (t) return openSheet({ kind: 'title', key: t.closest('.tile').dataset.key });
+  if (e.target.closest('#sheet-body [data-similar]')) return openSheet({ kind: 'similar', key: stack.at(-1).key });
   const p = e.target.closest('[data-person]');
   if (p) return openSheet({ kind: 'person', id: Number(p.dataset.person) });
 });
@@ -350,6 +424,24 @@ document.addEventListener('change', (e) => {
 $('#sheet-close').addEventListener('click', () => closeSheet());
 $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') closeSheet(true); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && stack.length) closeSheet(); });
+
+// --- find: the Movies / Shows / Limited series toggle -------------------------------
+const KIND_LABEL = { all: 'All', movie: 'Movies', show: 'Shows', limited: 'Limited series' };
+let lastQuery = null;
+
+function renderKinds() {
+  $('#kinds').innerHTML = Object.entries(KIND_LABEL)
+    .map(([k, l]) => `<button data-kind="${k}" class="${k === status.kind ? 'on' : ''}" aria-pressed="${k === status.kind}">${l}</button>`).join('');
+}
+$('#kinds').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-kind]');
+  if (!b || b.dataset.kind === status.kind) return;
+  api.settings({ kind: b.dataset.kind });
+  refresh();
+  renderKinds();
+  if (browseState.category) loadBrowse();
+  else if (lastQuery) runSearch(lastQuery);
+});
 
 // --- find: search and categories -----------------------------------------------
 const browseState = { category: null, sub: null, page: 1, totalPages: 0 };
@@ -372,6 +464,7 @@ function renderChips() {
 }
 
 function openCategory(category, sub = null) {
+  lastQuery = null;
   browseState.category = category;
   browseState.sub = sub;
   $('#q').value = '';
@@ -382,7 +475,8 @@ function openCategory(category, sub = null) {
 }
 
 async function loadBrowse(append = false) {
-  if (!browseState.category) return;
+  if (!browseState.category || (append && browseState.loading)) return;
+  browseState.loading = true;
   if (!append) { browseState.page = 1; $('#browse-grid').innerHTML = ''; }
   $('#more').hidden = true;
   const cat = categories.find((c) => c.key === browseState.category)?.name;
@@ -398,16 +492,31 @@ async function loadBrowse(append = false) {
     });
     browseState.totalPages = r.totalPages;
     renderWall('#browse-grid', r.items, append);
-    show('#browse-msg', $('#browse-grid').children.length ? legend() : 'Nothing here yet. Try another category.');
+    const empty = status.kind === 'limited' || status.kind === 'show' || status.kind === 'movie'
+      ? `Nothing here for ${KIND_LABEL[status.kind].toLowerCase()}. Try All.` : 'Nothing here yet. Try another category.';
+    show('#browse-msg', $('#browse-grid').children.length ? legend() : empty);
     $('#more').hidden = browseState.page >= browseState.totalPages;
   } catch (e) { show('#browse-msg', e.message, true); }
+  browseState.loading = false;
+  topUp();
+}
+
+// As you clear posters off a category, quietly load the next page so the
+// wall never runs dry.
+function topUp() {
+  const left = $('#browse-grid').querySelectorAll('.tile:not(.leaving)').length;
+  if (browseState.category && !browseState.loading && left < 12 && browseState.page < browseState.totalPages) {
+    browseState.page++;
+    loadBrowse(true);
+  }
 }
 
 const legend = () => (status.services.length
-  ? 'Green ring = a service you have. Seen and passed titles drop off this list next time.'
+  ? 'Green ring = a service you have. Tap ✓, bookmark or ✕ and the poster moves off this screen.'
   : 'Tap a poster for cast and where to watch. Add your services in Settings to see which you already have.');
 
 async function runSearch(q) {
+  lastQuery = q;
   browseState.category = null;
   renderChips();
   $('#browse-results').hidden = true;
@@ -434,7 +543,8 @@ async function runSearch(q) {
       renderWall('#topic-grid', r.topic.items);
     }
     const n = r.items.length + (r.topic?.items.length ?? 0) + r.people.length;
-    show('#search-msg', n ? legend() : r.suggestions.length ? 'No titles matched, but try the category above.' : 'Nothing matched. Try fewer words, or someone in the cast.');
+    const hidden = r.hiddenByKind ? ` ${r.hiddenByKind} more match${r.hiddenByKind === 1 ? 'es' : ''} if you switch to All.` : '';
+    show('#search-msg', (n ? legend() : r.suggestions.length ? 'No titles matched, but try the category above.' : 'Nothing matched. Try fewer words, or someone in the cast.') + hidden);
   } catch (e) { show('#search-msg', e.message, true); }
 }
 
@@ -611,6 +721,7 @@ if (DEMO) {
 }
 
 refresh();
+renderKinds();
 loadCategories();
 loadProviders();
 if (!status.hasKey) openView('settings');

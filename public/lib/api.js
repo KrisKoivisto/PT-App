@@ -1,9 +1,10 @@
 import { createTmdb, pool } from './tmdb.js';
 import { shape, matchServices, brand } from './titles.js';
-import { browse, search, detail, CATEGORIES, TRUE_CRIME_SUBS } from './browse.js';
+import { browse, search, detail, CATEGORIES, TRUE_CRIME_SUBS, KINDS } from './browse.js';
+import { moreLikeThis } from './similar.js';
 import { REACTIONS, annotate } from './mine.js';
 
-export const defaultProfile = () => ({ region: 'US', services: [], serviceBrands: [], ratings: [], watchlist: [], passed: [] });
+export const defaultProfile = () => ({ region: 'US', kind: 'all', services: [], serviceBrands: [], ratings: [], watchlist: [], passed: [] });
 const LISTS = ['ratings', 'watchlist', 'passed'];
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -36,13 +37,14 @@ export function createApi({ store, base, fetchImpl, builtInKey = null }) {
 
     status() {
       const counts = { want: profile.watchlist.length, seen: profile.ratings.length, passed: profile.passed.length };
-      return { hasKey: !!tmdb, ownKey: !!store.loadKey(), region: profile.region, services: profile.services, serviceBrands: profile.serviceBrands, counts };
+      return { hasKey: !!tmdb, ownKey: !!store.loadKey(), kind: profile.kind, region: profile.region, services: profile.services, serviceBrands: profile.serviceBrands, counts };
     },
 
     providers: async (region = profile.region) => done(await needKey().providerList(region.toUpperCase())),
 
     settings(body) {
       if (typeof body.region === 'string' && /^[A-Za-z]{2}$/.test(body.region)) profile.region = body.region.toUpperCase();
+      if (KINDS.includes(body.kind)) profile.kind = body.kind;
       if (Array.isArray(body.services)) {
         profile.services = body.services.map(Number).filter(Number.isInteger);
         // Names too, so "Netflix Standard with Ads" counts when you ticked Netflix.
@@ -87,6 +89,12 @@ export function createApi({ store, base, fetchImpl, builtInKey = null }) {
       ]);
       if (!items.length) throw fail('TMDB has no such title.', 404);
       return done({ ...annotate(profile, items)[0], cast: credits?.cast ?? [] });
+    },
+
+    // Titles that are about the same things as this one (see similar.js).
+    async similar(type, tmdbId) {
+      const r = await moreLikeThis(needKey(), profile, type, tmdbId);
+      return done({ ...r, items: annotate(profile, r.items) });
     },
 
     // An actor (or director) and the titles they're known for.

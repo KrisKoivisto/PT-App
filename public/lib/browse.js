@@ -80,6 +80,23 @@ export async function detail(tmdb, profile, list) {
   return rows.filter(Boolean);
 }
 
+// The quick toggle: everything, movies, ongoing shows, or limited series.
+// TMDB types TV as Scripted, Miniseries, Documentary, Reality and so on;
+// discover takes them as numbers (2 is Miniseries).
+export const KINDS = ['all', 'movie', 'show', 'limited'];
+const KIND_QUERY = {
+  all: [['movie', {}], ['tv', {}]],
+  movie: [['movie', {}]],
+  show: [['tv', { with_type: '0|1|3|4|5|6' }]],
+  limited: [['tv', { with_type: '2' }]],
+};
+export function matchesKind(item, kind = 'all') {
+  if (kind === 'movie') return item.type === 'movie';
+  if (kind === 'show') return item.type === 'tv' && item.tvType !== 'Miniseries';
+  if (kind === 'limited') return item.type === 'tv' && item.tvType === 'Miniseries';
+  return true;
+}
+
 export async function browse(tmdb, profile, { category, sub = null, page = 1, onlyMine = false }) {
   const cat = CATEGORIES.find((c) => c.key === category);
   if (!cat) throw Object.assign(new Error('Unknown category.'), { status: 400 });
@@ -94,9 +111,9 @@ export async function browse(tmdb, profile, { category, sub = null, page = 1, on
   }
 
   const calls = [];
-  for (const t of ['movie', 'tv']) {
+  for (const [t, kindParams] of KIND_QUERY[profile.kind] ?? KIND_QUERY.all) {
     for (const params of await querySets(tmdb, cat, subcat, t)) {
-      calls.push({ t, params: { ...params, sort_by: 'popularity.desc', ...where, page } });
+      calls.push({ t, params: { ...params, ...kindParams, sort_by: 'popularity.desc', ...where, page } });
     }
   }
 
@@ -108,9 +125,10 @@ export async function browse(tmdb, profile, { category, sub = null, page = 1, on
     for (const x of r?.results ?? []) byKey.set(`${t}:${x.id}`, { type: t, id: x.id, rank: x.popularity ?? 0 });
   });
 
-  // Movies and shows mixed, most popular first, minus what you've seen or passed.
+  // Movies and shows mixed, most popular first, minus anything you've
+  // already marked (seen, bookmarked or passed).
   const found = [...byKey.values()].sort((a, b) => b.rank - a.rank);
-  const seen = seenSet([...profile.ratings, ...(profile.passed ?? [])]);
+  const seen = seenSet([...profile.ratings, ...profile.watchlist, ...(profile.passed ?? [])]);
   const items = (await detail(tmdb, profile, found)).filter((i) => !isSeen(seen, i));
   return { items, page, totalPages, category: cat.name, sub: subcat?.name ?? null };
 }
@@ -195,7 +213,8 @@ async function topicTitles(tmdb, kws) {
 export async function search(tmdb, profile, q) {
   const suggestions = matchCategories(q);
   const { titles, people } = await tmdb.search(q);
-  const items = await detail(tmdb, profile, titles.map((h) => ({ type: h.type, id: h.tmdbId })));
+  const all = await detail(tmdb, profile, titles.map((h) => ({ type: h.type, id: h.tmdbId })));
+  const items = all.filter((i) => matchesKind(i, profile.kind));
 
   // Plot-ish searches ("nurse who killed patients") rarely match a title, so
   // also try them as topics. Skip when the query is clearly a title.
@@ -207,8 +226,10 @@ export async function search(tmdb, profile, q) {
     if (hit) {
       const have = new Set(items.map((i) => `${i.type}:${i.tmdbId}`));
       const list = hit.list.filter((f) => !have.has(`${f.type}:${f.id}`)).slice(0, 12);
-      if (list.length) topic = { label: hit.kws.map((k) => k.name).join(' + '), items: await detail(tmdb, profile, list) };
+      const topicItems = (await detail(tmdb, profile, list)).filter((i) => matchesKind(i, profile.kind));
+      if (topicItems.length) topic = { label: hit.kws.map((k) => k.name).join(' + '), items: topicItems };
     }
   }
-  return { suggestions, people, items, topic };
+  // How many title matches the Movies/Shows/Limited toggle hid, so the app can say so.
+  return { suggestions, people, items, topic, hiddenByKind: all.length - items.length };
 }

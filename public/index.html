@@ -43,6 +43,7 @@
       <input id="q" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off"
         placeholder="Title, actor, or what it's about" aria-label="Search">
     </form>
+    <div id="kinds" class="kinds" aria-label="Show me"></div>
 
     <div id="cats" class="chips scroll"></div>
     <div id="subcats" class="chips scroll sub" hidden></div>
@@ -54,10 +55,10 @@
         <div id="people" class="people scroll"></div>
       </div>
       <h2 id="titles-label" class="shelf" hidden>Titles</h2>
-      <div id="search-grid" class="wall"></div>
+      <div id="search-grid" class="wall" data-clear></div>
       <div id="topic" hidden>
         <h2 id="topic-label" class="shelf"></h2>
-        <div id="topic-grid" class="wall"></div>
+        <div id="topic-grid" class="wall" data-clear></div>
       </div>
       <p id="search-msg" class="msg"></p>
     </div>
@@ -67,7 +68,7 @@
         <h2 id="browse-title" class="shelf" hidden></h2>
         <label id="mine-toggle" class="check" hidden><input type="checkbox" id="b-mine"> Only my services</label>
       </div>
-      <div id="browse-grid" class="wall"></div>
+      <div id="browse-grid" class="wall" data-clear></div>
       <p id="browse-msg" class="msg">Search for anything, or pick a category.</p>
       <button id="more" class="more" hidden>Show more</button>
     </div>

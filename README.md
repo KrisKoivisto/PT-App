@@ -3,9 +3,11 @@
 A phone app that does two things:
 
 1. **Tells you where something is streaming.** Search a title, an actor, or what it's about ("bank heist", "nurse who killed patients"), or browse a category. True crime splits into subcategories like Love gone wrong, Heists & robberies, and Con artists & scams. Every poster shows the services streaming it, with a green ring on the ones you have. Tap a poster for every way to watch it and the cast. Tap an actor for everything they're in.
-2. **Keeps your list.** Every poster has three one-tap buttons: ✓ Seen it, Bookmark, ✕ Pass. Seen and passed titles drop off the category lists next time. My list shows Bookmarked, Seen and Passed. On the detail screen you can also say how it was (Loved it, Liked it, Not for me), with quick reasons that fit the kind of show.
+2. **Keeps your list.** Every poster has three one-tap buttons: ✓ Seen it, Bookmark, ✕ Pass. Tap one and the poster leaves the Find screen and everything moves up (Undo puts it back); categories top themselves up as you clear them. My list shows Bookmarked, Seen and Passed. On the detail screen you can also say how it was (Loved it, Liked it, Not for me), with quick reasons that fit the kind of show.
 
 It doesn't log in to any streaming service.
+
+A toggle switches between All, Movies, Shows and Limited series (TMDB's own Miniseries label). **More like this** on any title finds others about the same things: it weighs the tags TMDB has for the story (rare, central ones like "nurse" + "serial killer" count most; settings, moods and production tags count little), requires at least two shared story tags and a shared genre, keeps true stories with true stories, and shows the shared tags under each poster. TMDB's own "similar" list was too loose to use (it put The Devil Wears Prada next to The Good Nurse).
 
 **Open it:** https://kriskoivisto.github.io/PT-App/ (or [try it with sample data](https://kriskoivisto.github.io/PT-App/?demo))
 
@@ -27,6 +29,7 @@ Plain HTML, CSS and JavaScript in `public/`, no build step and no dependencies.
 - `public/app.js`: the screens
 - `public/lib/api.js`: everything the app does, run in the browser
 - `public/lib/browse.js`: categories, true crime subcategories, search
+- `public/lib/similar.js`: More like this
 - `public/lib/titles.js`, `mine.js`, `reasons.js`: title data, your marks, reason lists
 - `public/lib/tmdb.js`: TMDB client with caching
 - `public/lib/demo.js`: made-up catalog for sample mode
