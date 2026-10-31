@@ -44,6 +44,14 @@
         placeholder="Title, actor, or what it's about" aria-label="Search">
     </form>
     <div id="kinds" class="kinds" aria-label="Show me"></div>
+    <div class="filterbar">
+      <button id="open-filters" class="filter-btn" aria-haspopup="dialog">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+        Sort &amp; filter <span id="filter-count" class="count-pill" hidden></span>
+      </button>
+      <span id="filter-summary" class="filter-summary"></span>
+      <button id="clear-filters" class="link-btn" hidden>Clear</button>
+    </div>
 
     <div id="cats" class="chips scroll"></div>
     <div id="subcats" class="chips scroll sub" hidden></div>
@@ -66,7 +74,6 @@
     <div id="browse-results">
       <div class="shelf-row">
         <h2 id="browse-title" class="shelf" hidden></h2>
-        <label id="mine-toggle" class="check" hidden><input type="checkbox" id="b-mine"> Only my services</label>
       </div>
       <div id="browse-grid" class="wall" data-clear></div>
       <p id="browse-msg" class="msg">Search for anything, or pick a category.</p>
@@ -140,6 +147,17 @@
   <div class="sheet-panel" role="dialog" aria-modal="true">
     <button id="sheet-close" class="sheet-close" aria-label="Close"></button>
     <div id="sheet-body"></div>
+  </div>
+</div>
+
+<div id="panel" class="panel" hidden>
+  <div class="panel-card" role="dialog" aria-modal="true" aria-labelledby="panel-title">
+    <div class="panel-head">
+      <h2 id="panel-title">Sort &amp; filter</h2>
+      <button id="panel-reset" class="link-btn">Reset</button>
+    </div>
+    <div id="panel-body"></div>
+    <button id="panel-done" class="primary panel-done">Show results</button>
   </div>
 </div>
 

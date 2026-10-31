@@ -5,6 +5,7 @@ import { createApi, browserStore } from '../public/lib/api.js';
 import { matchCategories } from '../public/lib/browse.js';
 import { demoFetch } from '../public/lib/demo.js';
 import { reasonsFor, kindOf } from '../public/lib/reasons.js';
+import { discoverParams, applyView, cleanView, describeView, activeFilters } from '../public/lib/filters.js';
 import { createServer } from '../server.js';
 
 // --- fake TMDB ------------------------------------------------------------------
@@ -140,7 +141,8 @@ test('categories: genres by name, keywords for true crime, movies and shows mixe
     api.settings({ services: [8, 15] });
     await api.mark({ list: 'ratings', type: 'movie', tmdbId: 1, reaction: 'love' });
     calls.length = 0;
-    r = await api.browse({ category: 'crime', onlyMine: true });
+    api.settings({ view: { where: 'mine' } });
+    r = await api.browse({ category: 'crime' });
     const d = calls.find((x) => x.pathname === '/discover/tv');
     assert.equal(d.searchParams.get('with_watch_providers'), '8|15');
     assert.equal(d.searchParams.get('watch_region'), 'US');
@@ -380,6 +382,61 @@ test('more like this: shared story tags, best first, nothing vague, nothing you 
   api.settings({ kind: 'movie' });
   r = await api.similar('tv', 102);
   assert.ok(r.items.every((i) => i.type === 'movie'));
+});
+
+test('sort and filter become the right TMDB queries for categories', async () => {
+  const { api, close } = await setup();
+  try {
+    const now = new Date('2026-10-31T12:00:00Z');
+    const profile = { region: 'US', services: [8], serviceBrands: ['netflix'] };
+    let p = discoverParams(cleanView({ sort: 'top', rating: 7, released: 'five' }), 'movie', profile, now);
+    assert.deepEqual(p, {
+      sort_by: 'vote_average.desc', 'vote_count.gte': 200, 'vote_average.gte': 7,
+      'primary_release_date.gte': '2021-10-31', 'primary_release_date.lte': '2026-10-31',
+    });
+    p = discoverParams(cleanView({ sort: 'newest', where: 'pick', picks: [{ id: 8, name: 'Netflix' }, { id: 1899, name: 'HBO Max' }] }), 'tv', profile, now);
+    assert.equal(p.sort_by, 'first_air_date.desc');
+    assert.equal(p['first_air_date.lte'], '2026-10-31', 'nothing that is not out yet');
+    assert.equal(p.with_watch_providers, '8|1899');
+    p = discoverParams(cleanView({ sort: 'oldest', released: 'classic' }), 'tv', profile, now);
+    assert.deepEqual([p.sort_by, p['first_air_date.lte'], p['first_air_date.gte']], ['first_air_date.asc', '1999-12-31', undefined]);
+
+    // Movies and shows from separate calls merge in the chosen order
+    api.settings({ view: { sort: 'top' } });
+    calls.length = 0;
+    const r = await api.browse({ category: 'true-crime' });
+    assert.ok(calls.filter((u) => u.pathname.startsWith('/discover/')).every((u) => u.searchParams.get('sort_by') === 'vote_average.desc'));
+    assert.equal(r.items.length, 3);
+    assert.equal(api.status().view.sort, 'top');
+    api.settings({ view: { sort: 'loudest', rating: 9.5, where: 'nowhere' } });
+    assert.deepEqual(api.status().view, cleanView({}), 'junk falls back to defaults');
+  } finally { close(); }
+});
+
+test('filters apply to search results; sorting only when you pick one', () => {
+  const now = new Date('2026-10-31T12:00:00Z');
+  const item = (title, extra) => ({ title, stream: [], free: [], voteAverage: 7, voteCount: 100, popularity: 1, releaseDate: '2020-01-01', ...extra });
+  const items = [
+    item('Old Netflix', { stream: [{ id: 1796, name: 'Netflix Standard with Ads' }], releaseDate: '1995-05-05', voteAverage: 8.4, popularity: 5 }),
+    item('New Hulu', { stream: [{ id: 15, name: 'Hulu' }], releaseDate: '2026-01-01', voteAverage: 6.1, popularity: 50 }),
+    item('Rated by three', { stream: [{ id: 8, name: 'Netflix' }], voteAverage: 9.9, voteCount: 3, popularity: 9 }),
+  ];
+  const profile = { services: [8], serviceBrands: ['netflix'] };
+  const titles = (v, opts) => applyView(items, cleanView(v), profile, { now, ...opts }).map((i) => i.title);
+
+  assert.deepEqual(titles({ where: 'mine' }, { sort: false }), ['Old Netflix', 'Rated by three'], 'ad tier counts as Netflix');
+  assert.deepEqual(titles({ rating: 7 }), ['Old Netflix'], 'a 9.9 from three votes is not a 7+');
+  assert.deepEqual(titles({ released: 'year' }), ['New Hulu']);
+  assert.deepEqual(titles({ released: 'classic' }), ['Old Netflix']);
+  assert.deepEqual(titles({ sort: 'newest' }), ['New Hulu', 'Rated by three', 'Old Netflix']);
+  assert.deepEqual(titles({ sort: 'oldest' }), ['Old Netflix', 'Rated by three', 'New Hulu']);
+  assert.deepEqual(titles({ sort: 'top' }), ['Rated by three', 'Old Netflix', 'New Hulu']);
+  assert.deepEqual(titles({ sort: 'popular' }), ['New Hulu', 'Rated by three', 'Old Netflix']);
+
+  const v = cleanView({ sort: 'top', where: 'pick', picks: [{ id: 8, name: 'Netflix' }], rating: 7, released: 'five' });
+  assert.equal(describeView(v, (p) => p.brand === 'netflix' ? 'Netflix' : p.brand), 'Top rated · Netflix · 7+ rating · Last 5 years');
+  assert.equal(activeFilters(v), 4);
+  assert.equal(activeFilters(cleanView({})), 0);
 });
 
 test('static server serves the app and nothing outside it', async () => {

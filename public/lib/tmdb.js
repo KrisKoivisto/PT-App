@@ -116,12 +116,12 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
         id: d.id, title: d.title, name: d.name, release_date: d.release_date, first_air_date: d.first_air_date,
         overview: d.overview, poster_path: d.poster_path, backdrop_path: d.backdrop_path, genres: d.genres,
         runtime: d.runtime, episode_run_time: d.episode_run_time, number_of_seasons: d.number_of_seasons,
-        vote_average: d.vote_average, vote_count: d.vote_count, type: d.type,
+        vote_average: d.vote_average, vote_count: d.vote_count, popularity: d.popularity, type: d.type,
         external_ids: { imdb_id: d.external_ids?.imdb_id ?? null },
         // Movies send keywords.keywords, TV sends keywords.results.
         keywords: (d.keywords?.keywords ?? d.keywords?.results ?? []).map((k) => ({ id: k.id, name: k.name })),
         'watch/providers': { results: { [region]: d['watch/providers']?.results?.[region] } },
-      }, `#${region}#2`),
+      }, `#${region}#3`),
 
     async providerList(region) {
       const [m, t] = await Promise.all([
@@ -131,7 +131,9 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
       // One entry per brand, shown under its plain name ("HBO Max", not
       // "HBO Max Amazon Channel") when TMDB has one.
       const variant = (n) => /channel$|with ads$/i.test(n);
-      const all = [...(m?.results ?? []), ...(t?.results ?? [])]
+      // Rent-or-buy stores aren't services you subscribe to.
+      const store = (n) => /store|amazon video$|google play|fandango at home$|microsoft|vudu|justwatch/i.test(n);
+      const all = [...(m?.results ?? []), ...(t?.results ?? [])].filter((p) => !store(p.provider_name))
         .map((p) => ({ id: p.provider_id, name: p.provider_name, logo: p.logo_path, priority: p.display_priorities?.[region] ?? p.display_priority ?? 999 }))
         .sort((a, b) => Number(variant(a.name)) - Number(variant(b.name)) || a.priority - b.priority);
       const byBrand = new Map();

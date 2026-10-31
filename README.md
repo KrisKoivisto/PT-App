@@ -7,7 +7,7 @@ A phone app that does two things:
 
 It doesn't log in to any streaming service.
 
-A toggle switches between All, Movies, Shows and Limited series (TMDB's own Miniseries label). **More like this** on any title finds others about the same things: it weighs the tags TMDB has for the story (rare, central ones like "nurse" + "serial killer" count most; settings, moods and production tags count little), requires at least two shared story tags and a shared genre, keeps true stories with true stories, and shows the shared tags under each poster. TMDB's own "similar" list was too loose to use (it put The Devil Wears Prada next to The Good Nurse).
+**Sort & filter** (one button on Find) sorts by Popular now, Top rated, Newest or Oldest, and filters by where it streams (anywhere, your services, or specific ones), minimum rating, and release date. It applies to categories (as TMDB queries) and search; More like this keeps its best-match order but honors the filters. A toggle switches between All, Movies, Shows and Limited series (TMDB's own Miniseries label). **More like this** on any title finds others about the same things: it weighs the tags TMDB has for the story (rare, central ones like "nurse" + "serial killer" count most; settings, moods and production tags count little), requires at least two shared story tags and a shared genre, keeps true stories with true stories, and shows the shared tags under each poster. TMDB's own "similar" list was too loose to use (it put The Devil Wears Prada next to The Good Nurse).
 
 **Open it:** https://kriskoivisto.github.io/PT-App/ (or [try it with sample data](https://kriskoivisto.github.io/PT-App/?demo))
 
@@ -30,6 +30,7 @@ Plain HTML, CSS and JavaScript in `public/`, no build step and no dependencies.
 - `public/lib/api.js`: everything the app does, run in the browser
 - `public/lib/browse.js`: categories, true crime subcategories, search
 - `public/lib/similar.js`: More like this
+- `public/lib/filters.js`: Sort & filter
 - `public/lib/titles.js`, `mine.js`, `reasons.js`: title data, your marks, reason lists
 - `public/lib/tmdb.js`: TMDB client with caching
 - `public/lib/demo.js`: made-up catalog for sample mode

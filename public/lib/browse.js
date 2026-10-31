@@ -1,5 +1,6 @@
 import { pool } from './tmdb.js';
 import { shape, matchServices, seenSet, isSeen } from './titles.js';
+import { cleanView, discoverParams, rankOf, applyView } from './filters.js';
 
 // Keyword ids below were checked on themoviedb.org/search/keyword.
 const KW = { trueCrime: 33722, trueStory: 9672 };
@@ -97,35 +98,32 @@ export function matchesKind(item, kind = 'all') {
   return true;
 }
 
-export async function browse(tmdb, profile, { category, sub = null, page = 1, onlyMine = false }) {
+export async function browse(tmdb, profile, { category, sub = null, page = 1 }) {
   const cat = CATEGORIES.find((c) => c.key === category);
   if (!cat) throw Object.assign(new Error('Unknown category.'), { status: 400 });
   const subcat = sub && category === 'true-crime' ? TRUE_CRIME_SUBS.find((s) => s.key === sub) : null;
   if (sub && !subcat) throw Object.assign(new Error('Unknown subcategory.'), { status: 400 });
 
-  const where = {};
-  if (onlyMine && profile.services.length) {
-    where.watch_region = profile.region;
-    where.with_watch_providers = profile.services.join('|');
-    where.with_watch_monetization_types = 'flatrate|free|ads';
-  }
-
+  // Sort and filters (Sort & filter panel) become discover parameters.
+  const view = cleanView(profile.view);
   const calls = [];
   for (const [t, kindParams] of KIND_QUERY[profile.kind] ?? KIND_QUERY.all) {
+    const viewParams = discoverParams(view, t, profile);
     for (const params of await querySets(tmdb, cat, subcat, t)) {
-      calls.push({ t, params: { ...params, ...kindParams, sort_by: 'popularity.desc', ...where, page } });
+      calls.push({ t, params: { ...params, ...kindParams, ...viewParams, page } });
     }
   }
+  const rank = rankOf(view.sort);
 
   let totalPages = 0;
   const byKey = new Map();
   await pool(calls, CONCURRENCY, async ({ t, params }) => {
     const r = await tmdb.discover(t, params);
     totalPages = Math.max(totalPages, Math.min(r?.total_pages ?? 0, 500));
-    for (const x of r?.results ?? []) byKey.set(`${t}:${x.id}`, { type: t, id: x.id, rank: x.popularity ?? 0 });
+    for (const x of r?.results ?? []) byKey.set(`${t}:${x.id}`, { type: t, id: x.id, rank: rank(x) });
   });
 
-  // Movies and shows mixed, most popular first, minus anything you've
+  // Movies and shows mixed in the chosen order, minus anything you've
   // already marked (seen, bookmarked or passed).
   const found = [...byKey.values()].sort((a, b) => b.rank - a.rank);
   const seen = seenSet([...profile.ratings, ...profile.watchlist, ...(profile.passed ?? [])]);
@@ -213,8 +211,11 @@ async function topicTitles(tmdb, kws) {
 export async function search(tmdb, profile, q) {
   const suggestions = matchCategories(q);
   const { titles, people } = await tmdb.search(q);
+  // Search keeps TMDB's best-match order unless you picked a sort; the
+  // toggle and filters apply either way.
+  const view = cleanView(profile.view);
   const all = await detail(tmdb, profile, titles.map((h) => ({ type: h.type, id: h.tmdbId })));
-  const items = all.filter((i) => matchesKind(i, profile.kind));
+  const items = applyView(all.filter((i) => matchesKind(i, profile.kind)), view, profile, { sort: view.sort !== 'popular' });
 
   // Plot-ish searches ("nurse who killed patients") rarely match a title, so
   // also try them as topics. Skip when the query is clearly a title.
@@ -226,10 +227,10 @@ export async function search(tmdb, profile, q) {
     if (hit) {
       const have = new Set(items.map((i) => `${i.type}:${i.tmdbId}`));
       const list = hit.list.filter((f) => !have.has(`${f.type}:${f.id}`)).slice(0, 12);
-      const topicItems = (await detail(tmdb, profile, list)).filter((i) => matchesKind(i, profile.kind));
+      const topicItems = applyView((await detail(tmdb, profile, list)).filter((i) => matchesKind(i, profile.kind)), view, profile, { sort: view.sort !== 'popular' });
       if (topicItems.length) topic = { label: hit.kws.map((k) => k.name).join(' + '), items: topicItems };
     }
   }
-  // How many title matches the Movies/Shows/Limited toggle hid, so the app can say so.
+  // How many title matches the toggle and filters hid, so the app can say so.
   return { suggestions, people, items, topic, hiddenByKind: all.length - items.length };
 }

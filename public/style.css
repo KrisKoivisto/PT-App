@@ -135,6 +135,33 @@ input[type=checkbox] { accent-color: var(--accent); }
 .kinds button { padding: 7px 2px; border: 0; border-radius: 7px; background: none; color: var(--muted); font-size: .82rem; font-weight: 600; white-space: nowrap; }
 .kinds button.on { background: var(--accent); color: var(--on-accent); }
 
+/* Sort & filter */
+.filterbar { display: flex; align-items: center; gap: 10px; margin-top: 10px; min-width: 0; }
+.filter-btn {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid var(--line);
+  border-radius: 999px; background: var(--surface); font-size: .85rem; font-weight: 600;
+}
+.filter-btn .i { width: 17px; height: 17px; }
+.count-pill { min-width: 19px; height: 19px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: .72rem; line-height: 19px; text-align: center; font-variant-numeric: tabular-nums; }
+.filter-summary { flex: 1; min-width: 0; font-size: .78rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.filterbar .link-btn { flex: none; font-size: .85rem; }
+.panel { position: fixed; inset: 0; z-index: 35; display: flex; align-items: flex-end; justify-content: center; background: var(--scrim); }
+.panel-card {
+  width: 100%; max-width: 640px; max-height: 88%; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--bg); border: 1px solid var(--line); border-bottom: 0; border-radius: 18px 18px 0 0;
+  padding: 18px var(--gr) calc(18px + env(safe-area-inset-bottom, 0px)) var(--gl);
+}
+@media (min-width: 700px) { .panel { align-items: center; } .panel-card { border-radius: 18px; border-bottom: 1px solid var(--line); } }
+@media (prefers-reduced-motion: no-preference) { .panel:not([hidden]) .panel-card { animation: rise .2s ease-out; } }
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; }
+.panel-head h2 { margin: 0; font: 800 1.5rem/1 var(--display); text-transform: uppercase; letter-spacing: .02em; }
+.panel h3 { margin: 18px 0 8px; font-size: .7rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.chips.wrap { flex-wrap: wrap; margin-top: 0; }
+.chips .svc { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px 5px 5px; }
+.chips .svc img { width: 22px; height: 22px; border-radius: 5px; }
+.chips.wrap button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.panel-done { width: 100%; margin-top: 22px; padding: 13px; border-radius: 12px; font-size: 1rem; }
+
 /* More like this */
 .more-like {
   width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 14px 16px;

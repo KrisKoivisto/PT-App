@@ -3,6 +3,7 @@ import { demoFetch } from './lib/demo.js';
 import { reasonsFor } from './lib/reasons.js';
 import { brand } from './lib/titles.js';
 import { BUILT_IN_KEY } from './lib/config.js';
+import { SORTS, RATINGS, RELEASED, defaultView, describeView, activeFilters } from './lib/filters.js';
 
 const $ = (s) => document.querySelector(s);
 const IMG = 'https://image.tmdb.org/t/p';
@@ -73,10 +74,13 @@ function show(id, msg, isErr) {
   el.className = 'msg' + (isErr ? ' err' : '');
 }
 
-// Streaming (and free) services for a title, one per brand, yours first.
+// Streaming (and free) services for a title, one per brand (shown under its
+// plain name, not "... Amazon Channel"), yours first.
+const variant = (p) => /channel$|with ads$/i.test(p.name);
 function services(it) {
   const seen = new Set();
   return [...it.stream, ...it.free]
+    .sort((a, b) => Number(variant(a)) - Number(variant(b)))
     .filter((p) => !seen.has(brand(p.name)) && seen.add(brand(p.name)))
     .map((p) => ({ ...p, yours: status.services.includes(p.id) || status.serviceBrands.includes(brand(p.name)) }))
     .sort((a, b) => Number(b.yours) - Number(a.yours));
@@ -439,9 +443,102 @@ $('#kinds').addEventListener('click', (e) => {
   api.settings({ kind: b.dataset.kind });
   refresh();
   renderKinds();
+  rerunFind();
+});
+
+// --- find: sort & filter -----------------------------------------------------------
+let draft = null; // the panel's choices until "Show results"
+let providerChoices = [];
+
+function renderFilterBar() {
+  const n = activeFilters(status.view);
+  $('#filter-count').hidden = !n;
+  $('#filter-count').textContent = n;
+  $('#filter-summary').textContent = n ? describeView(status.view) : '';
+  $('#clear-filters').hidden = !n;
+}
+
+function rerunFind() {
   if (browseState.category) loadBrowse();
   else if (lastQuery) runSearch(lastQuery);
+}
+
+function chip(attr, value, label, on) {
+  return `<button ${attr}="${esc(String(value))}" class="${on ? 'on' : ''}" aria-pressed="${on}">${esc(label)}</button>`;
+}
+
+function renderPanel() {
+  const v = draft;
+  const picked = new Set(v.picks.map((p) => p.id));
+  // Your services first, then the big ones, then the next most common,
+  // plus anything already picked.
+  const mine = new Set(status.services);
+  const big = ['netflix', 'amazon prime video', 'max', 'hulu', 'disney plus', 'apple tv', 'peacock', 'paramount plus'];
+  const rank = (p) => (big.includes(brand(p.name)) ? big.indexOf(brand(p.name)) : big.length);
+  const others = providerChoices.filter((p) => !mine.has(p.id)).map((p, i) => ({ p, i }))
+    .sort((a, b) => rank(a.p) - rank(b.p) || a.i - b.i).map(({ p }) => p);
+  const list = [...providerChoices.filter((p) => mine.has(p.id)), ...others.slice(0, 12)];
+  for (const p of v.picks) if (!list.some((x) => x.id === p.id)) list.push(p);
+  $('#panel-body').innerHTML = `
+    <h3>Sort by</h3>
+    <div class="chips wrap">${Object.entries(SORTS).map(([k, l]) => chip('data-sort', k, l, v.sort === k)).join('')}</div>
+    <h3>Streaming on</h3>
+    <div class="chips wrap">
+      ${chip('data-where', 'any', 'Anywhere', v.where === 'any')}
+      ${status.services.length ? chip('data-where', 'mine', 'My services', v.where === 'mine') : ''}
+      ${list.map((p) => `<button data-pick="${p.id}" data-name="${esc(p.name)}" class="svc${v.where === 'pick' && picked.has(p.id) ? ' on' : ''}" aria-pressed="${v.where === 'pick' && picked.has(p.id)}">
+        ${p.logo ? `<img src="${img('w92', p.logo)}" alt="">` : ''}${esc(p.name)}</button>`).join('')}
+    </div>
+    <h3>Rating</h3>
+    <div class="chips wrap">${RATINGS.map((r) => chip('data-rating', r, r ? `${r}+` : 'Any', v.rating === r)).join('')}</div>
+    <h3>Released</h3>
+    <div class="chips wrap">${Object.entries(RELEASED).map(([k, l]) => chip('data-released', k, l, v.released === k)).join('')}</div>`;
+}
+
+async function openPanel() {
+  draft = structuredClone(status.view);
+  $('#panel').hidden = false;
+  document.body.classList.add('locked');
+  renderPanel();
+  if (!providerChoices.length && status.hasKey) {
+    try { providerChoices = await api.providers(status.region); renderPanel(); } catch {}
+  }
+}
+
+function closePanel() {
+  $('#panel').hidden = true;
+  if (!stack.length) document.body.classList.remove('locked');
+}
+
+$('#open-filters').addEventListener('click', openPanel);
+$('#panel').addEventListener('click', (e) => {
+  if (e.target.id === 'panel') return closePanel();
+  const b = e.target.closest('button');
+  if (!b || !draft) return;
+  if (b.dataset.sort) draft.sort = b.dataset.sort;
+  else if (b.dataset.where) { draft.where = b.dataset.where; draft.picks = []; }
+  else if (b.dataset.pick) {
+    const id = Number(b.dataset.pick);
+    const picks = draft.where === 'pick' ? draft.picks : [];
+    draft.picks = picks.some((p) => p.id === id) ? picks.filter((p) => p.id !== id) : [...picks, { id, name: b.dataset.name }];
+    draft.where = draft.picks.length ? 'pick' : 'any';
+  } else if (b.dataset.rating) draft.rating = Number(b.dataset.rating);
+  else if (b.dataset.released) draft.released = b.dataset.released;
+  else if (b.id === 'panel-reset') draft = defaultView();
+  else if (b.id === 'panel-done') {
+    api.settings({ view: draft });
+    refresh();
+    closePanel();
+    return rerunFind();
+  } else return;
+  renderPanel();
 });
+$('#clear-filters').addEventListener('click', () => {
+  api.settings({ view: defaultView() });
+  refresh();
+  rerunFind();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#panel').hidden) closePanel(); });
 
 // --- find: search and categories -----------------------------------------------
 const browseState = { category: null, sub: null, page: 1, totalPages: 0 };
@@ -483,17 +580,16 @@ async function loadBrowse(append = false) {
   const sub = trueCrimeSubs.find((s) => s.key === browseState.sub)?.name;
   $('#browse-title').hidden = false;
   $('#browse-title').textContent = sub ? `${cat} · ${sub}` : cat;
-  $('#mine-toggle').hidden = !status.services.length;
   show('#browse-msg', 'Loading…');
   try {
     const r = await api.browse({
       category: browseState.category, sub: browseState.sub, page: browseState.page,
-      onlyMine: $('#b-mine').checked,
     });
     browseState.totalPages = r.totalPages;
     renderWall('#browse-grid', r.items, append);
-    const empty = status.kind === 'limited' || status.kind === 'show' || status.kind === 'movie'
-      ? `Nothing here for ${KIND_LABEL[status.kind].toLowerCase()}. Try All.` : 'Nothing here yet. Try another category.';
+    const empty = activeFilters(status.view)
+      ? 'Nothing here matches your sort & filter. Loosen them, or tap Clear.'
+      : status.kind !== 'all' ? `Nothing here for ${KIND_LABEL[status.kind].toLowerCase()}. Try All.` : 'Nothing here yet. Try another category.';
     show('#browse-msg', $('#browse-grid').children.length ? legend() : empty);
     $('#more').hidden = browseState.page >= browseState.totalPages;
   } catch (e) { show('#browse-msg', e.message, true); }
@@ -543,7 +639,8 @@ async function runSearch(q) {
       renderWall('#topic-grid', r.topic.items);
     }
     const n = r.items.length + (r.topic?.items.length ?? 0) + r.people.length;
-    const hidden = r.hiddenByKind ? ` ${r.hiddenByKind} more match${r.hiddenByKind === 1 ? 'es' : ''} if you switch to All.` : '';
+    const why = activeFilters(status.view) ? (status.kind !== 'all' ? 'without the toggle and filters' : 'without your filters') : 'if you switch to All';
+    const hidden = r.hiddenByKind ? ` ${r.hiddenByKind} more match${r.hiddenByKind === 1 ? 'es' : ''} ${why}.` : '';
     show('#search-msg', (n ? legend() : r.suggestions.length ? 'No titles matched, but try the category above.' : 'Nothing matched. Try fewer words, or someone in the cast.') + hidden);
   } catch (e) { show('#search-msg', e.message, true); }
 }
@@ -567,7 +664,6 @@ $('#search-form').addEventListener('submit', (e) => {
   $('#q').blur(); // drop the phone keyboard so results are visible
   runSearch(q);
 });
-$('#b-mine').addEventListener('change', () => loadBrowse());
 $('#more').addEventListener('click', () => { browseState.page++; loadBrowse(true); });
 
 // --- my list ----------------------------------------------------------------------
@@ -622,9 +718,9 @@ function renderStatus() {
   $('#region').innerHTML = Object.entries(REGIONS).map(([c, n]) => `<option value="${c}" ${c === status.region ? 'selected' : ''}>${n}</option>`).join('');
   $('#key-card').hidden = DEMO || (status.hasKey && !keyRejected);
   $('#key-state').textContent = status.ownKey ? 'Using the key you pasted on this phone. ✓' : '';
+  renderFilterBar();
   const total = status.counts.want + status.counts.seen;
   $('#list-count').textContent = total || '';
-  if (!status.services.length) $('#b-mine').checked = false;
 }
 
 function refresh() {

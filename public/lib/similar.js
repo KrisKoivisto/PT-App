@@ -1,6 +1,7 @@
 import { pool } from './tmdb.js';
 import { seenSet, isSeen } from './titles.js';
 import { detail, matchesKind } from './browse.js';
+import { cleanView, applyView } from './filters.js';
 
 // Tags that describe the production, not the story.
 const GENERIC = /^(\d{4}s|based on (novel or book|comic|short story|play or musical|tv series|video game)|woman director|duringcreditsstinger|aftercreditsstinger|sequel|remake|miniseries|anime|live action remake|female protagonist|male protagonist|lgbt|lgbtq)$/i;
@@ -143,7 +144,8 @@ export async function moreLikeThis(tmdb, profile, type, id, { limit = 20 } = {})
 
   // Only real matches: a meaningful shared-tag weight, and close to the best.
   const best = Math.max(0, ...scored.map((s) => s.score));
-  const list = scored
+  // Best match first always; the toggle and filters still apply.
+  const list = applyView(scored, cleanView(profile.view), profile, { sort: false })
     .filter((s) => matchesKind(s, profile.kind))
     // Two shared story tags at least: moods alone never make a match.
     .filter((s) => s.score > 0 && s.storyCount >= 2 && s.storyWeight >= 0.8 && s.score >= best * 0.3)

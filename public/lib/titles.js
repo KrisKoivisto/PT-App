@@ -8,6 +8,8 @@ export function shape(type, d, region) {
     type,
     title: d.title ?? d.name,
     year: Number((d.release_date ?? d.first_air_date ?? '').slice(0, 4)) || null,
+    releaseDate: d.release_date || d.first_air_date || null,
+    popularity: d.popularity ?? 0,
     overview: d.overview,
     poster: d.poster_path,
     backdrop: d.backdrop_path ?? null,
