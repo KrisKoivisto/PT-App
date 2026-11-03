@@ -116,15 +116,19 @@ test('an actor page lists what they are known for, minus guest spots and repeats
 test('categories: genres by name, keywords for true crime, movies and shows mixed', async () => {
   const { api, close } = await setup();
   try {
-    const { categories, trueCrime } = api.categories();
+    const { categories, subs } = api.categories();
     assert.equal(categories[0].name, 'True crime');
-    assert.ok(trueCrime.some((c) => c.name === 'Heists & robberies'));
+    assert.ok(subs['true-crime'].some((c) => c.name === 'Heists & robberies'));
+    assert.ok(subs.horror.some((c) => c.name === 'Haunted houses'));
+    assert.equal(subs.standup, undefined, 'stand-up has no subcategories');
 
     calls.length = 0;
     let r = await api.browse({ category: 'true-crime' });
     for (const u of calls.filter((x) => x.pathname.startsWith('/discover/'))) {
       assert.equal(u.searchParams.get('with_keywords'), '33722');
-      assert.equal(u.searchParams.get('with_watch_providers'), null, 'shows everything by default');
+      assert.equal(u.searchParams.get('with_watch_providers'), null, 'any service by default');
+      assert.equal(u.searchParams.get('with_watch_monetization_types'), 'flatrate|free|ads|rent|buy', 'but only things you can watch here');
+      assert.equal(u.searchParams.get('watch_region'), 'US');
     }
     assert.deepEqual(r.items.map((i) => i.title), ['Cold Trail', 'Vault Job', 'Con Man']);
     assert.equal(r.totalPages, 3);
@@ -185,7 +189,7 @@ test('search: titles, people with photos, plot words as topics, category shortcu
     assert.deepEqual(r.topic.items.map((i) => i.title), ['Con Man']);
 
     assert.deepEqual((await api.search('  ')).items, []);
-    assert.deepEqual(matchCategories('that bank heist doc').map((s) => s.label), ['Documentary', 'True crime › Heists & robberies']);
+    assert.deepEqual(matchCategories('that bank heist doc').map((s) => s.label), ['Documentary', 'True crime › Heists & robberies', 'Crime › Heists']);
     assert.deepEqual(matchCategories("lover's quarrel").map((s) => s.label), ['True crime › Love gone wrong']);
     assert.deepEqual(matchCategories('con man').map((s) => s.label), ['True crime › Con artists & scams']);
     assert.deepEqual(matchCategories('the staircase'), []);
@@ -328,7 +332,7 @@ test('sample mode works end to end with no network', async () => {
   api.settings({ services: [8, 15] });
 
   let r = await api.search('bank heist');
-  assert.deepEqual(r.suggestions.map((x) => x.label), ['True crime › Heists & robberies']);
+  assert.deepEqual(r.suggestions.map((x) => x.label), ['True crime › Heists & robberies', 'Crime › Heists']);
   assert.deepEqual(r.items.map((i) => i.title), ['Heist Week']);
 
   r = await api.browse({ category: 'true-crime', sub: 'heist' });
@@ -393,6 +397,7 @@ test('sort and filter become the right TMDB queries for categories', async () =>
     assert.deepEqual(p, {
       sort_by: 'vote_average.desc', 'vote_count.gte': 200, 'vote_average.gte': 7,
       'primary_release_date.gte': '2021-10-31', 'primary_release_date.lte': '2026-10-31',
+      watch_region: 'US', with_watch_monetization_types: 'flatrate|free|ads|rent|buy',
     });
     p = discoverParams(cleanView({ sort: 'newest', where: 'pick', picks: [{ id: 8, name: 'Netflix' }, { id: 1899, name: 'HBO Max' }] }), 'tv', profile, now);
     assert.equal(p.sort_by, 'first_air_date.desc');
@@ -437,6 +442,31 @@ test('filters apply to search results; sorting only when you pick one', () => {
   assert.equal(describeView(v, (p) => p.brand === 'netflix' ? 'Netflix' : p.brand), 'Top rated · Netflix · 7+ rating · Last 5 years');
   assert.equal(activeFilters(v), 4);
   assert.equal(activeFilters(cleanView({})), 0);
+});
+
+test('every category but stand-up has subcategories, queried as genre AND topic', async () => {
+  const { api, close } = await setup();
+  try {
+    calls.length = 0;
+    let r = await api.browse({ category: 'thriller', sub: 'spy' });
+    assert.equal(r.sub, 'Spies');
+    let u = calls.find((x) => x.pathname === '/discover/movie');
+    assert.deepEqual([u.searchParams.get('with_genres'), u.searchParams.get('with_keywords')], ['53|9648', '470|5265']);
+
+    // Keyword category + keyword sub: one AND call per keyword
+    calls.length = 0;
+    await api.browse({ category: 'true-story', sub: 'music' });
+    assert.deepEqual(calls.filter((x) => x.pathname === '/discover/movie').map((x) => x.searchParams.get('with_keywords')).sort(), ['9672,283297', '9672,4048']);
+    // Keyword category + genre sub
+    calls.length = 0;
+    await api.browse({ category: 'true-story', sub: 'crime' });
+    u = calls.find((x) => x.pathname === '/discover/movie');
+    assert.deepEqual([u.searchParams.get('with_keywords'), u.searchParams.get('with_genres')], ['9672', '80']);
+
+    await assert.rejects(api.browse({ category: 'crime', sub: 'heist-of-the-century' }), /Unknown subcategory/);
+    assert.deepEqual(matchCategories('haunted house movie').map((x) => x.label), ['Horror › Haunted houses']);
+    assert.ok(matchCategories('time travel').some((x) => x.label === 'Sci-fi & fantasy › Time travel'));
+  } finally { close(); }
 });
 
 test('static server serves the app and nothing outside it', async () => {

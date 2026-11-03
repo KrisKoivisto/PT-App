@@ -29,7 +29,7 @@ export const CATEGORIES = [
 
 // True crime, split by what the case is about.
 export const TRUE_CRIME_SUBS = [
-  { key: 'love', name: 'Love gone wrong', keywords: [199645, 365990, 164494, 931], aliases: ['lover', 'lovers', 'quarrel', 'passion', 'jealous', 'jealousy', 'affair', 'cheating', 'husband', 'wife', 'spouse', 'marriage'] },
+  { key: 'love', name: 'Love gone wrong', keywords: [199645, 365990, 164494, 931, 1326, 11925, 241804, 323684, 159278], aliases: ['lover', 'lovers', 'quarrel', 'passion', 'jealous', 'jealousy', 'affair', 'cheating', 'husband', 'wife', 'spouse', 'marriage'] },
   { key: 'heist', name: 'Heists & robberies', keywords: [10051, 191845, 15363, 642], aliases: ['heist', 'heists', 'robbery', 'robberies', 'bank', 'robber', 'theft', 'steal', 'stole', 'jewel'] },
   { key: 'con', name: 'Con artists & scams', keywords: [3202, 10453, 4373, 159325], aliases: ['con', 'conman', 'con man', 'con artist', 'scam', 'scammer', 'fraud', 'grifter', 'grift', 'swindle', 'impostor', 'imposter', 'ponzi'] },
   { key: 'serial', name: 'Serial killers', keywords: [10714, 234906, 17987], aliases: ['serial', 'serial killer', 'killer', 'killers', 'spree'] },
@@ -42,11 +42,93 @@ export const TRUE_CRIME_SUBS = [
   { key: 'court', name: 'In the courtroom', keywords: [207240, 33519, 11038], aliases: ['trial', 'court', 'courtroom', 'lawyer', 'jury'] },
   { key: 'whitecollar', name: 'White-collar crime', keywords: [174075, 163072, 226550], aliases: ['white collar', 'white-collar', 'embezzlement', 'corporate', 'wall street'] },
   { key: 'hackers', name: 'Hackers', keywords: [2157, 157239], aliases: ['hacker', 'hackers', 'hacking', 'cyber'] },
-  { key: 'prison', name: 'Prison breaks', keywords: [9777], aliases: ['prison', 'escape', 'jailbreak', 'prison break'] },
+  { key: 'prison', name: 'Prison breaks', keywords: [9777, 191047, 169271, 329486, 267333], aliases: ['prison', 'escape', 'jailbreak', 'prison break'] },
   { key: 'stalkers', name: 'Stalkers', keywords: [6844], aliases: ['stalker', 'stalking', 'obsession'] },
   { key: 'hitmen', name: 'Hitmen & murder for hire', keywords: [2708], aliases: ['hitman', 'hit man', 'murder for hire', 'contract killer'] },
-  { key: 'poison', name: 'Poisonings', keywords: [351], aliases: ['poison', 'poisoned', 'poisoning'] },
+  { key: 'poison', name: 'Poisonings', keywords: [351, 238192, 254185], aliases: ['poison', 'poisoned', 'poisoning'] },
 ];
+
+// Subcategories for every other category. Each one is the category AND any of
+// the listed TMDB keywords (or, under "Based on a true story", a genre).
+// Keyword ids were looked up on TMDB and checked to return titles you can
+// watch in the US; a few are movie-only because TMDB's TV list has no such
+// genre (horror, romance).
+const topic = (key, name, keywords) => ({ key, name, keywords });
+export const SUBS = {
+  crime: [
+    topic('heist', 'Heists', [10051, 15363]), topic('mob', 'Mob & mafia', [10391, 10291, 3149]), topic('drugs', 'Drugs & cartels', [10175, 2231]),
+    topic('detective', 'Detectives', [703, 15167]), topic('serial', 'Serial killers', [10714]), topic('court', 'Courtroom', [33519, 11038]),
+    topic('con', 'Con artists', [10453, 3202]), topic('hitmen', 'Hitmen', [2708]), topic('prison', 'Prison', [378]),
+    topic('cops', 'Dirty cops', [11734]), topic('noir', 'Noir', [207268, 9807]),
+  ],
+  documentary: [
+    topic('truecrime', 'True crime', [33722]), topic('nature', 'Nature & animals', [18330, 9902, 18165]), topic('music', 'Music', [283297, 4048, 11700]),
+    topic('sports', 'Sports', [159290, 333328]), topic('history', 'History & war', [282633, 1956]), topic('science', 'Science & space', [287067, 9882, 252634]),
+    topic('food', 'Food', [10637, 1918]), topic('politics', 'Politics', [6078]), topic('bio', 'Biographies', [5565]), topic('cults', 'Cults', [6158]),
+    topic('investigations', 'Investigations', [195240, 10410]),
+  ],
+  comedy: [
+    topic('sitcom', 'Sitcoms', [193171]), topic('romcom', 'Rom-coms', [9799]), topic('dark', 'Dark comedy', [10123]), topic('satire', 'Satire & parody', [8201, 9755]),
+    topic('mock', 'Mockumentary', [11800]), topic('work', 'Workplace', [210605, 1438]), topic('buddy', 'Buddy comedy', [167541]),
+    topic('school', 'High school', [6270]), topic('sketch', 'Sketch', [156203]),
+  ],
+  drama: [
+    topic('family', 'Family drama', [12279]), topic('period', 'Period', [15060, 192772]), topic('legal', 'Legal', [222517, 33519]),
+    topic('medical', 'Medical', [208788, 11612]), topic('political', 'Political', [298528, 6078]), topic('coming', 'Coming of age', [10683]),
+    topic('teen', 'Teen', [193400]), topic('addiction', 'Addiction', [6782]), topic('sports', 'Sports', [294708, 333328]), topic('truestory', 'True stories', [9672]),
+  ],
+  thriller: [
+    topic('psych', 'Psychological', [12565]), topic('whodunit', 'Whodunits', [12570, 207046]), topic('spy', 'Spies', [470, 5265]),
+    topic('conspiracy', 'Conspiracies', [10410, 298530]), topic('survival', 'Survival', [10349]), topic('kidnap', 'Kidnapping', [1930]),
+    topic('revenge', 'Revenge', [9748]), topic('political', 'Political', [209817]), topic('erotic', 'Erotic', [207767]),
+  ],
+  action: [
+    topic('superhero', 'Superheroes', [9715]), topic('martial', 'Martial arts', [779]), topic('spy', 'Spies', [470, 5265]), topic('military', 'Military', [162365]),
+    topic('disaster', 'Disaster', [10617]), topic('heist', 'Heists', [10051]), topic('treasure', 'Treasure hunts', [6956]), topic('revenge', 'Revenge', [9748]),
+    topic('mercenary', 'Mercenaries', [3070]),
+  ],
+  scifi: [
+    topic('space', 'Space', [9882, 161176]), topic('time', 'Time travel', [4379]), topic('dystopia', 'Dystopia', [4565]), topic('postapoc', 'Post-apocalyptic', [4458]),
+    topic('aliens', 'Aliens', [9951]), topic('ai', 'AI & robots', [310, 14544]), topic('cyberpunk', 'Cyberpunk', [12190]), topic('magic', 'Magic', [2343]),
+    topic('dragons', 'Dragons', [12554]), topic('superhero', 'Superheroes', [9715]), topic('vampires', 'Vampires', [3133]),
+  ],
+  horror: [
+    topic('slasher', 'Slashers', [12339]), topic('supernatural', 'Supernatural', [6152]), topic('haunted', 'Haunted houses', [3358]), topic('ghosts', 'Ghosts', [162846]),
+    topic('zombies', 'Zombies', [12377]), topic('possession', 'Possession', [161261]), topic('found', 'Found footage', [163053]),
+    topic('psych', 'Psychological', [295907]), topic('monsters', 'Monsters', [1299]), topic('folk', 'Folk horror', [209568]),
+    topic('body', 'Body horror', [283085]), topic('vampires', 'Vampires', [3133]),
+  ],
+  romance: [
+    topic('romcom', 'Rom-coms', [9799]), topic('triangle', 'Love triangles', [128]), topic('enemies', 'Enemies to lovers', [282986]),
+    topic('friends', 'Friends to lovers', [282988]), topic('forbidden', 'Forbidden love', [3691]), topic('first', 'First love', [157303, 188237]),
+    topic('holiday', 'Holiday', [207317, 65]), topic('wedding', 'Weddings', [13027]), topic('second', 'Second chances', [34004]), topic('lgbt', 'LGBTQ+', [158718]),
+  ],
+  'true-story': [
+    { key: 'crime', name: 'Crime', genres: { movie: ['Crime'], tv: ['Crime'] } }, topic('bio', 'Biopics', [5565]),
+    { key: 'war', name: 'War', genres: { movie: ['War'], tv: ['War & Politics'] } }, topic('sports', 'Sports', [159290, 333328]),
+    topic('disaster', 'Disasters', [10617]), topic('music', 'Music', [4048, 283297]), topic('politics', 'Politics', [6078]),
+  ],
+  history: [
+    topic('ww2', 'World War II', [1956]), topic('ww1', 'World War I', [2504]), topic('vietnam', 'Vietnam', [2957]), topic('civilwar', 'Civil War', [179585]),
+    topic('coldwar', 'Cold War', [2106]), topic('ancient', 'Ancient world', [5049, 162861]), topic('royals', 'Royals', [9920, 220649, 2471]),
+    topic('c19', '1800s', [207928]), topic('c18', '1700s', [160279]),
+  ],
+  animation: [
+    topic('anime', 'Anime', [210024]), topic('adult', 'Adult animation', [161919]), topic('stop', 'Stop motion', [10121]), topic('superhero', 'Superheroes', [9715]),
+    topic('fairy', 'Fairy tales', [3205]), topic('musical', 'Musicals', [4344]), topic('talking', 'Talking animals', [267848]),
+  ],
+  family: [
+    topic('holiday', 'Holiday', [207317, 65]), topic('animals', 'Animals', [15162, 18165, 267848]), topic('fairy', 'Fairy tales', [3205]),
+    topic('princess', 'Princesses', [7376]), topic('musical', 'Musicals', [4344]), topic('superhero', 'Superheroes', [9715]), topic('magic', 'Magic', [2343]),
+  ],
+  reality: [
+    topic('dating', 'Dating', [215119, 13043]), topic('competition', 'Competitions', [250845, 271]), topic('cooking', 'Cooking', [222083, 1918]),
+    topic('home', 'Home & real estate', [182804, 179867]), topic('makeover', 'Makeovers', [34130]), topic('game', 'Game shows', [4325]),
+  ],
+};
+SUBS['true-crime'] = TRUE_CRIME_SUBS;
+
+export const subsOf = (category) => SUBS[category] ?? [];
 
 const CONCURRENCY = 8;
 
@@ -54,7 +136,7 @@ const CONCURRENCY = 8;
 // how a true crime subcategory works: TMDB can AND or OR keywords but not
 // both at once, so "true crime AND (heist OR robbery)" is one call per pair.
 async function querySets(tmdb, cat, sub, type) {
-  if (sub) {
+  if (sub && cat.key === 'true-crime') {
     const sets = [];
     for (const k of sub.keywords) {
       sets.push({ with_keywords: `${KW.trueCrime},${k}` });
@@ -63,11 +145,25 @@ async function querySets(tmdb, cat, sub, type) {
     sets.push({ with_keywords: sub.keywords.join('|'), with_genres: GENRE.documentary });
     return sets;
   }
-  if (cat.keywords) return [{ with_keywords: cat.keywords.join('|') }];
-  if (!cat[type]) return [];
-  const all = await tmdb.genres(type);
-  const ids = all.filter((g) => cat[type].includes(g.name)).map((g) => g.id);
-  return ids.length ? [{ with_genres: ids.join('|') }] : [];
+  const genreIds = async (names) => {
+    if (!names) return [];
+    const all = await tmdb.genres(type);
+    return all.filter((g) => names.includes(g.name)).map((g) => g.id);
+  };
+  if (cat.keywords) {
+    if (!sub) return [{ with_keywords: cat.keywords.join('|') }];
+    // Keyword categories ("Based on a true story"): AND a genre in one call,
+    // or AND each keyword in its own call (TMDB can't mix AND and OR).
+    if (sub.genres) {
+      const ids = await genreIds(sub.genres[type]);
+      return ids.length ? [{ with_keywords: cat.keywords.join('|'), with_genres: ids.join('|') }] : [];
+    }
+    return sub.keywords.map((k) => ({ with_keywords: `${cat.keywords[0]},${k}` }));
+  }
+  const ids = await genreIds(cat[type]);
+  if (!ids.length) return [];
+  // Genre categories: the genre AND any of the subcategory's keywords.
+  return [{ with_genres: ids.join('|'), ...(sub ? { with_keywords: sub.keywords.join('|') } : {}) }];
 }
 
 // Turn bare TMDB ids into full items with where-to-watch.
@@ -101,7 +197,7 @@ export function matchesKind(item, kind = 'all') {
 export async function browse(tmdb, profile, { category, sub = null, page = 1 }) {
   const cat = CATEGORIES.find((c) => c.key === category);
   if (!cat) throw Object.assign(new Error('Unknown category.'), { status: 400 });
-  const subcat = sub && category === 'true-crime' ? TRUE_CRIME_SUBS.find((s) => s.key === sub) : null;
+  const subcat = sub ? subsOf(category).find((s) => s.key === sub) : null;
   if (sub && !subcat) throw Object.assign(new Error('Unknown subcategory.'), { status: 400 });
 
   // Sort and filters (Sort & filter panel) become discover parameters.
@@ -152,7 +248,21 @@ export function matchCategories(q) {
       out.push({ category: 'true-crime', sub: s.key, label: `True crime › ${s.name}` });
     }
   }
-  return out.slice(0, 6);
+  // Other subcategories by name ("haunted houses", "time travel"), once per
+  // name: "Heists" under Crime, not again under Action.
+  const names = new Set();
+  for (const c of CATEGORIES) {
+    if (c.key === 'true-crime') continue;
+    for (const s of subsOf(c.key)) {
+      const name = s.name.toLowerCase();
+      if (names.has(name) || name.length < 5) continue;
+      if (hasPhrase(n, name) || hasPhrase(n, name.replace(/s$/, ''))) {
+        names.add(name);
+        out.push({ category: c.key, sub: s.key, label: `${c.name} › ${s.name}` });
+      }
+    }
+  }
+  return out.slice(0, 4);
 }
 
 // How people describe a crime vs. how TMDB tags it ("killed" -> murder).

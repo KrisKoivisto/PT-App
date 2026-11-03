@@ -599,25 +599,29 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#pan
 // --- find: search and categories -----------------------------------------------
 const browseState = { category: null, sub: null, page: 1, totalPages: 0 };
 let categories = [];
-let trueCrimeSubs = [];
+let subsByCat = {};
 
 function loadCategories() {
-  ({ categories, trueCrime: trueCrimeSubs } = api.categories());
+  ({ categories, subs: subsByCat } = api.categories());
   $('#cats').innerHTML = kindPicker() + categories.map((c) => `<button data-cat="${c.key}">${esc(c.name)}</button>`).join('');
 }
 
 function renderChips() {
   document.querySelectorAll('#cats button').forEach((x) => x.classList.toggle('on', x.dataset.cat === browseState.category));
-  const subs = browseState.category === 'true-crime';
-  $('#subcats').hidden = !subs;
-  if (subs) {
-    $('#subcats').innerHTML = [{ key: '', name: 'All true crime' }, ...trueCrimeSubs]
+  const subs = subsByCat[browseState.category] ?? [];
+  $('#subcats').hidden = !subs.length;
+  if (subs.length) {
+    const cat = categories.find((c) => c.key === browseState.category);
+    $('#subcats').innerHTML = [{ key: '', name: `All ${cat.name.toLowerCase()}` }, ...subs]
       .map((s) => `<button data-sub="${s.key}" class="${(browseState.sub ?? '') === s.key ? 'on' : ''}">${esc(s.name)}</button>`).join('');
+    // Keep the chosen one in view when the row scrolls sideways.
+    $('#subcats .on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 }
 
 function openCategory(category, sub = null) {
   lastQuery = null;
+  searchReq++;
   browseState.category = category;
   browseState.sub = sub;
   $('#q').value = '';
@@ -627,8 +631,15 @@ function openCategory(category, sub = null) {
   loadBrowse();
 }
 
+// Each load gets a number; when a newer one has started (you tapped another
+// category before this one finished), its results are thrown away.
+let browseReq = 0;
+let searchReq = 0;
+let listReq = 0;
+
 async function loadBrowse(append = false) {
   if (!browseState.category || (append && browseState.loading)) return;
+  const req = ++browseReq;
   browseState.loading = true;
   if (!append) { browseState.page = 1; $('#browse-grid').innerHTML = ''; }
   $('#more').hidden = true;
@@ -637,6 +648,7 @@ async function loadBrowse(append = false) {
     const r = await api.browse({
       category: browseState.category, sub: browseState.sub, page: browseState.page,
     });
+    if (req !== browseReq) return;
     browseState.totalPages = r.totalPages;
     renderWall('#browse-grid', r.items, append);
     const empty = activeFilters(status.view)
@@ -644,9 +656,12 @@ async function loadBrowse(append = false) {
       : status.kind !== 'all' ? `Nothing here for ${KIND_LABEL[status.kind].toLowerCase()}. Try All.` : 'Nothing here yet. Try another category.';
     show('#browse-msg', $('#browse-grid').children.length ? legend() : empty);
     $('#more').hidden = browseState.page >= browseState.totalPages;
-  } catch (e) { show('#browse-msg', e.message, true); }
-  browseState.loading = false;
-  topUp();
+  } catch (e) {
+    if (req === browseReq) show('#browse-msg', e.message, true);
+  } finally {
+    if (req === browseReq) browseState.loading = false;
+  }
+  if (req === browseReq) topUp();
 }
 
 // As you clear posters off a category, quietly load the next page so the
@@ -672,8 +687,11 @@ async function runSearch(q) {
   for (const id of ['#search-grid', '#topic-grid', '#people', '#suggest']) $(id).innerHTML = '';
   for (const id of ['#topic', '#people-block', '#titles-label']) $(id).hidden = true;
   show('#search-msg', 'Searching…');
+  const req = ++searchReq;
+  browseReq++; // a category still loading must not land on top of these results
   try {
     const r = await api.search(q);
+    if (req !== searchReq || lastQuery !== q) return;
     $('#suggest').innerHTML = r.suggestions
       .map((s) => `<button data-go-cat="${s.category}" data-go-sub="${s.sub ?? ''}">See all: ${esc(s.label)}</button>`).join('');
     if (r.people.length) {
@@ -694,7 +712,7 @@ async function runSearch(q) {
     const why = activeFilters(status.view) ? (status.kind !== 'all' ? 'without the toggle and filters' : 'without your filters') : 'if you switch to All';
     const hidden = r.hiddenByKind ? ` ${r.hiddenByKind} more match${r.hiddenByKind === 1 ? 'es' : ''} ${why}.` : '';
     show('#search-msg', (n ? legend() : r.suggestions.length ? 'No titles matched, but try the category above.' : 'Nothing matched. Try fewer words, or someone in the cast.') + hidden);
-  } catch (e) { show('#search-msg', e.message, true); }
+  } catch (e) { if (req === searchReq) show('#search-msg', e.message, true); }
 }
 
 $('#cats').addEventListener('click', (e) => {
@@ -703,7 +721,7 @@ $('#cats').addEventListener('click', (e) => {
 });
 $('#subcats').addEventListener('click', (e) => {
   const b = e.target.closest('[data-sub]');
-  if (b) openCategory('true-crime', b.dataset.sub || null);
+  if (b) openCategory(browseState.category, b.dataset.sub || null);
 });
 $('#suggest').addEventListener('click', (e) => {
   const b = e.target.closest('[data-go-cat]');
@@ -735,8 +753,10 @@ function renderListTabs() {
 async function loadList() {
   renderListTabs();
   if (!$('#list-grid').children.length) show('#list-msg', 'Loading…');
+  const req = ++listReq;
   try {
     const { items: list } = await api.list(listShow);
+    if (req !== listReq) return;
     renderWall('#list-grid', list);
     if (!list.length) return show('#list-msg', LIST_EMPTY[listShow]);
     const streaming = list.filter((i) => i.services.length).length;
@@ -877,6 +897,15 @@ loadLogos();
 loadProviders();
 if (!status.hasKey) openView('settings');
 else openCategory('true-crime');
+
+// A home screen app can sit in memory for days without reloading, which kept
+// old versions running. Coming back after 15+ minutes away reloads it (your
+// list and settings are saved, so nothing is lost).
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) hiddenAt = Date.now();
+  else if (hiddenAt && Date.now() - hiddenAt > 15 * 60 * 1000 && !window.WTW_DEMO) location.reload();
+});
 
 // Ask the browser not to clear our storage (Safari otherwise can after a week
 // of not opening the site, unless it's been added to the home screen).

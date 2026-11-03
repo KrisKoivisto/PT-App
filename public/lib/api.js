@@ -1,6 +1,6 @@
 import { createTmdb, pool } from './tmdb.js';
 import { shape, matchServices, brand } from './titles.js';
-import { browse, search, detail, CATEGORIES, TRUE_CRIME_SUBS, KINDS } from './browse.js';
+import { browse, search, detail, CATEGORIES, subsOf, KINDS } from './browse.js';
 import { moreLikeThis } from './similar.js';
 import { cleanView, defaultView } from './filters.js';
 import { REACTIONS, annotate } from './mine.js';
@@ -58,7 +58,8 @@ export function createApi({ store, base, fetchImpl, builtInKey = null }) {
 
     categories: () => ({
       categories: CATEGORIES.map(({ key, name }) => ({ key, name })),
-      trueCrime: TRUE_CRIME_SUBS.map(({ key, name }) => ({ key, name })),
+      // Subcategories for each category that has them.
+      subs: Object.fromEntries(CATEGORIES.map((c) => [c.key, subsOf(c.key).map(({ key, name }) => ({ key, name }))]).filter(([, l]) => l.length)),
     }),
 
     async browse(p = {}) {

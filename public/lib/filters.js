@@ -66,6 +66,10 @@ export function discoverParams(view, type, profile, now = new Date()) {
   const svc = wantedServices(view, profile);
   if (svc?.ids.length) {
     Object.assign(p, { watch_region: profile.region, with_watch_providers: svc.ids.join('|'), with_watch_monetization_types: 'flatrate|free|ads' });
+  } else {
+    // Categories only list things you can watch in your country somehow
+    // (streaming, free, or rent/buy): no foreign shows with nowhere to see them.
+    Object.assign(p, { watch_region: profile.region, with_watch_monetization_types: 'flatrate|free|ads|rent|buy' });
   }
   return p;
 }
