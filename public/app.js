@@ -83,7 +83,10 @@ function services(it) {
     .sort((a, b) => Number(variant(a)) - Number(variant(b)))
     .filter((p) => !seen.has(brand(p.name)) && seen.add(brand(p.name)))
     .map((p) => ({ ...p, yours: status.services.includes(p.id) || status.serviceBrands.includes(brand(p.name)) }))
-    .sort((a, b) => Number(b.yours) - Number(a.yours));
+    // Services you're filtering by come first (so they're the logos you see),
+    // then yours.
+    .map((p) => ({ ...p, picked: pickedBrands().has(brand(p.name)) || selectedServices().has(p.id) }))
+    .sort((a, b) => Number(b.picked) - Number(a.picked) || Number(b.yours) - Number(a.yours));
 }
 
 const logoImg = (p, size = 'w92') => (p.logo
@@ -433,18 +436,75 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && stack.le
 const KIND_LABEL = { all: 'All', movie: 'Movies', show: 'Shows', limited: 'Limited series' };
 let lastQuery = null;
 
+// A small dropdown at the start of the category row.
+const kindPicker = () => `<label class="kind-chip${status.kind !== 'all' ? ' on' : ''}">
+    <select id="kind" aria-label="Movies, shows or limited series">
+      ${Object.entries(KIND_LABEL).map(([k, l]) => `<option value="${k}" ${k === status.kind ? 'selected' : ''}>${k === 'all' ? 'All types' : l}</option>`).join('')}
+    </select>
+  </label>`;
 function renderKinds() {
-  $('#kinds').innerHTML = Object.entries(KIND_LABEL)
-    .map(([k, l]) => `<button data-kind="${k}" class="${k === status.kind ? 'on' : ''}" aria-pressed="${k === status.kind}">${l}</button>`).join('');
+  const el = $('#cats .kind-chip');
+  if (el) el.outerHTML = kindPicker();
 }
-$('#kinds').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-kind]');
-  if (!b || b.dataset.kind === status.kind) return;
-  api.settings({ kind: b.dataset.kind });
+$('#cats').addEventListener('change', (e) => {
+  if (e.target.id !== 'kind') return;
+  api.settings({ kind: e.target.value });
   refresh();
   renderKinds();
   rerunFind();
 });
+
+// --- find: tap a service logo to see only what's on it -------------------------
+// Same filter as "Streaming on" in Sort & filter: tap Netflix for Netflix only,
+// tap Max too for either, tap again to turn one off.
+function pickedBrands() {
+  const v = status.view;
+  return new Set(v.where === 'pick' ? v.picks.map((p) => p.brand) : v.where === 'mine' ? status.serviceBrands : []);
+}
+
+function selectedServices() {
+  const v = status.view;
+  if (v.where === 'mine') return new Set(status.services);
+  if (v.where === 'pick') return new Set(v.picks.map((p) => p.id));
+  return new Set();
+}
+
+function renderLogos() {
+  if (!providerChoices.length) { $('#logos').hidden = true; return; }
+  const on = selectedServices();
+  const mine = new Set(status.services);
+  const big = ['netflix', 'amazon prime video', 'max', 'hulu', 'disney plus', 'apple tv', 'peacock', 'paramount plus'];
+  const rank = (p) => (mine.has(p.id) ? -1 : big.includes(brand(p.name)) ? big.indexOf(brand(p.name)) : big.length);
+  const list = providerChoices.map((p, i) => ({ p, i })).sort((a, b) => rank(a.p) - rank(b.p) || a.i - b.i)
+    .map(({ p }) => p).filter((p, i) => i < 12 || on.has(p.id));
+  $('#logos').hidden = false;
+  $('#logos').classList.toggle('filtering', on.size > 0);
+  $('#logos').innerHTML = `<button data-svc-all class="logo-all${on.size ? '' : ' on'}" aria-pressed="${!on.size}">All</button>`
+    + list.map((p) => `<button data-svc="${p.id}" data-name="${esc(p.name)}" class="logo-btn${on.has(p.id) ? ' on' : ''}" aria-pressed="${on.has(p.id)}" aria-label="${esc(p.name)}" title="${esc(p.name)}">
+      ${p.logo ? `<img src="${img('w92', p.logo)}" alt="">` : `<span>${esc(p.name.slice(0, 2))}</span>`}</button>`).join('');
+}
+
+$('#logos').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  const on = selectedServices();
+  if (b.dataset.svcAll !== undefined) on.clear();
+  else {
+    const id = Number(b.dataset.svc);
+    on.has(id) ? on.delete(id) : on.add(id);
+  }
+  const named = (id) => providerChoices.find((p) => p.id === id) ?? status.view.picks.find((p) => p.id === id) ?? { id, name: '' };
+  const picks = [...on].map((id) => ({ id, name: named(id).name }));
+  api.settings({ view: { ...status.view, where: picks.length ? 'pick' : 'any', picks } });
+  refresh();
+  rerunFind();
+});
+
+async function loadLogos() {
+  if (!status.hasKey) return;
+  try { providerChoices = await api.providers(status.region); } catch { return; }
+  renderLogos();
+}
 
 // --- find: sort & filter -----------------------------------------------------------
 let draft = null; // the panel's choices until "Show results"
@@ -454,8 +514,9 @@ function renderFilterBar() {
   const n = activeFilters(status.view);
   $('#filter-count').hidden = !n;
   $('#filter-count').textContent = n;
-  $('#filter-summary').textContent = n ? describeView(status.view) : '';
-  $('#clear-filters').hidden = !n;
+  $('#open-filters').classList.toggle('on', n > 0);
+  $('#open-filters').setAttribute('aria-label', n ? `Sort and filter: ${describeView(status.view)}` : 'Sort and filter');
+  renderLogos();
 }
 
 function rerunFind() {
@@ -533,11 +594,6 @@ $('#panel').addEventListener('click', (e) => {
   } else return;
   renderPanel();
 });
-$('#clear-filters').addEventListener('click', () => {
-  api.settings({ view: defaultView() });
-  refresh();
-  rerunFind();
-});
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#panel').hidden) closePanel(); });
 
 // --- find: search and categories -----------------------------------------------
@@ -547,7 +603,7 @@ let trueCrimeSubs = [];
 
 function loadCategories() {
   ({ categories, trueCrime: trueCrimeSubs } = api.categories());
-  $('#cats').innerHTML = categories.map((c) => `<button data-cat="${c.key}">${esc(c.name)}</button>`).join('');
+  $('#cats').innerHTML = kindPicker() + categories.map((c) => `<button data-cat="${c.key}">${esc(c.name)}</button>`).join('');
 }
 
 function renderChips() {
@@ -576,10 +632,6 @@ async function loadBrowse(append = false) {
   browseState.loading = true;
   if (!append) { browseState.page = 1; $('#browse-grid').innerHTML = ''; }
   $('#more').hidden = true;
-  const cat = categories.find((c) => c.key === browseState.category)?.name;
-  const sub = trueCrimeSubs.find((s) => s.key === browseState.sub)?.name;
-  $('#browse-title').hidden = false;
-  $('#browse-title').textContent = sub ? `${cat} · ${sub}` : cat;
   show('#browse-msg', 'Loading…');
   try {
     const r = await api.browse({
@@ -738,6 +790,7 @@ $('#key-form').addEventListener('submit', async (e) => {
     show('#key-msg', 'That works. Now tick your streaming services below.');
     refresh();
     await loadProviders();
+    loadLogos();
   } catch (err) {
     show('#key-msg', /rejected/.test(err.message) ? "TMDB didn't accept that key. Copy it again from your TMDB settings." : err.message, true);
   }
@@ -752,6 +805,7 @@ $('#region').addEventListener('change', async () => {
   api.settings({ region: $('#region').value, services: [] });
   refresh();
   await loadProviders();
+  loadLogos();
 });
 
 $('#backup').addEventListener('click', () => {
@@ -770,6 +824,7 @@ $('#restore').addEventListener('change', async (e) => {
     show('#backup-msg', `Restored ${r.ratings} seen and ${r.watchlist} watchlist titles.`);
     refresh();
     await loadProviders();
+    loadLogos();
   } catch (err) { show('#backup-msg', err.message, true); }
   e.target.value = '';
 });
@@ -817,8 +872,8 @@ if (DEMO) {
 }
 
 refresh();
-renderKinds();
 loadCategories();
+loadLogos();
 loadProviders();
 if (!status.hasKey) openView('settings');
 else openCategory('true-crime');

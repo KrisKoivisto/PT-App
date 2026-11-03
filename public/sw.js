@@ -1,6 +1,6 @@
 // Keeps the app shell available offline. Network first, so a new version
 // shows up on the next open; the cache is only a fallback.
-const CACHE = 'wtw-v8';
+const CACHE = 'wtw-v9';
 const SHELL = [
   './', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-192.png',
   'lib/api.js', 'lib/browse.js', 'lib/config.js', 'lib/demo.js', 'lib/filters.js', 'lib/mine.js', 'lib/reasons.js', 'lib/similar.js', 'lib/titles.js', 'lib/tmdb.js',
