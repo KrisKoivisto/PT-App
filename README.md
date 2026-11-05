@@ -20,7 +20,7 @@ A TMDB key (TMDB is the movie database it looks things up in) is built in at `pu
 
 ## Where your data lives
 
-On your phone, in the browser's storage for this site. On iPhone, the home screen icon and Safari keep separate copies, so stick to the home screen icon. There's no server; the app talks straight to TMDB. Use Settings → Save backup now and then.
+On your device, and, once you sign in with TMDB (Settings → Sync your phone and computer), in four private lists on your own TMDB account: "What to Watch · Bookmarked", "· Seen" (how it was, reasons and note in each item's comment), "· Passed", and "· Settings" (your services and filters, in its description). Sign in on each device and they all show the same list. Changes go up a moment after each tap and come down whenever you open or return to the app; changes made offline wait and go later. There's no server of ours; the app talks straight to TMDB.
 
 ## How it's built
 
@@ -31,6 +31,7 @@ Plain HTML, CSS and JavaScript in `public/`, no build step and no dependencies.
 - `public/lib/browse.js`: categories, true crime subcategories, search
 - `public/lib/similar.js`: More like this
 - `public/lib/filters.js`: Sort & filter
+- `public/lib/sync.js`: sync through your TMDB account
 - `public/lib/titles.js`, `mine.js`, `reasons.js`: title data, your marks, reason lists
 - `public/lib/tmdb.js`: TMDB client with caching
 - `public/lib/demo.js`: made-up catalog for sample mode

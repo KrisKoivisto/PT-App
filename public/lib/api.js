@@ -3,6 +3,7 @@ import { shape, matchServices, brand } from './titles.js';
 import { browse, search, detail, CATEGORIES, subsOf, KINDS } from './browse.js';
 import { moreLikeThis } from './similar.js';
 import { cleanView, defaultView } from './filters.js';
+import { createSync, encodeSeen, REMOTE_OF } from './sync.js';
 import { REACTIONS, annotate } from './mine.js';
 
 export const defaultProfile = () => ({ region: 'US', kind: 'all', view: defaultView(), services: [], serviceBrands: [], ratings: [], watchlist: [], passed: [] });
@@ -14,8 +15,9 @@ const clean = (s, max) => (typeof s === 'string' ? s.trim().slice(0, max) : '');
 // Everything the app does, with no server: the page calls these directly and
 // talks to TMDB itself. `store` persists the profile, key and response cache
 // (localStorage in the browser, memory in tests). A key pasted in Settings
-// wins over `builtInKey`.
-export function createApi({ store, base, fetchImpl, builtInKey = null }) {
+// wins over `builtInKey`. With `readToken`, the list syncs through the
+// user's TMDB account (see sync.js).
+export function createApi({ store, base, fetchImpl, builtInKey = null, readToken = null, syncBase }) {
   const profile = { ...defaultProfile(), ...(store.loadProfile() ?? {}) };
   const cache = store.cache;
   const make = (k) => (k ? createTmdb({ key: k, base, cache, fetchImpl }) : null);
@@ -23,6 +25,37 @@ export function createApi({ store, base, fetchImpl, builtInKey = null }) {
 
   const needKey = () => tmdb ?? (() => { throw fail('Add your TMDB key in Settings first.'); })();
   const save = () => store.saveProfile(profile);
+
+  // --- sync through TMDB -----------------------------------------------------------
+  const sync = readToken && store.loadSync
+    ? createSync({ readToken, base: syncBase, fetchImpl, store: { load: store.loadSync, save: store.saveSync } })
+    : null;
+  const prefsOf = () => ({ region: profile.region, services: profile.services, serviceBrands: profile.serviceBrands, kind: profile.kind, view: profile.view });
+  const queuePrefs = () => sync?.signedIn && sync.queue({ kind: 'prefs', prefs: prefsOf() });
+  // The remote side of marking a title: same moves as the local lists.
+  function queueMark(list, item) {
+    if (!sync?.signedIn) return;
+    const others = { ratings: ['watchlist', 'passed'], passed: ['watchlist', 'ratings'], watchlist: ['passed'] }[list];
+    sync.queue(
+      { kind: 'add', list: REMOTE_OF[list], item, comment: list === 'ratings' ? encodeSeen(item) : undefined },
+      ...others.map((l) => ({ kind: 'remove', list: REMOTE_OF[l], item })),
+    );
+  }
+  // Replace the local lists with what's on TMDB (after sending local changes).
+  function adopt(remote) {
+    profile.watchlist = remote.watchlist;
+    profile.ratings = remote.ratings;
+    profile.passed = remote.passed;
+    const p = remote.prefs;
+    if (p && typeof p === 'object' && Object.keys(p).length) {
+      if (typeof p.region === 'string') profile.region = p.region;
+      if (Array.isArray(p.services)) profile.services = p.services;
+      if (Array.isArray(p.serviceBrands)) profile.serviceBrands = p.serviceBrands;
+      if (KINDS.includes(p.kind)) profile.kind = p.kind;
+      if (p.view) profile.view = cleanView(p.view);
+    }
+    save();
+  }
   const done = (x) => { cache.save?.(); return x; };
 
   return {
@@ -53,6 +86,7 @@ export function createApi({ store, base, fetchImpl, builtInKey = null }) {
         profile.serviceBrands = (Array.isArray(body.serviceNames) ? body.serviceNames : []).map((n) => brand(String(n))).filter(Boolean);
       }
       save();
+      queuePrefs();
       return { ok: true };
     },
 
@@ -158,13 +192,16 @@ export function createApi({ store, base, fetchImpl, builtInKey = null }) {
       const drop = { ratings: ['watchlist', 'passed'], passed: ['watchlist', 'ratings'], watchlist: ['passed'] }[list];
       for (const l of drop) profile[l] = profile[l].filter((i) => !same(i));
       save();
+      queueMark(list, item);
       return done(annotate(profile, [item])[0]);
     },
 
     unmark({ list, type, tmdbId, imdbId }) {
       if (!LISTS.includes(list)) throw fail('Bad list.');
-      profile[list] = profile[list].filter((i) => !((i.tmdbId === tmdbId && i.type === type) || (imdbId && i.imdbId === imdbId)));
+      const gone = profile[list].filter((i) => (i.tmdbId === tmdbId && i.type === type) || (imdbId && i.imdbId === imdbId));
+      profile[list] = profile[list].filter((i) => !gone.includes(i));
       save();
+      if (sync?.signedIn) for (const i of gone) if (i.tmdbId) sync.queue({ kind: 'remove', list: REMOTE_OF[list], item: i });
       return { ok: true };
     },
 
@@ -189,9 +226,47 @@ export function createApi({ store, base, fetchImpl, builtInKey = null }) {
     },
 
     reset() {
+      // Deleting your list deletes it everywhere you're signed in.
+      if (sync?.signedIn) {
+        for (const l of ['watchlist', 'ratings', 'passed']) {
+          for (const i of profile[l]) if (i.tmdbId) sync.queue({ kind: 'remove', list: REMOTE_OF[l], item: i });
+        }
+      }
       Object.assign(profile, defaultProfile());
       save();
       return { ok: true };
+    },
+
+    sync: {
+      status: () => ({ available: !!sync, signedIn: !!sync?.signedIn, waiting: !!sync?.waiting, lastSync: sync?.lastSync ?? null, pending: sync?.pendingChanges ?? 0 }),
+      startSignIn: (returnUrl) => sync.startSignIn(returnUrl),
+
+      // Finishes sign-in once approved, then merges this device's list with
+      // what's already on TMDB: nothing on either side is lost.
+      async finishSignIn() {
+        if (!(await sync.finishSignIn())) return false;
+        const remote = await sync.pull();
+        const has = (l, i) => remote[l].some((r) => r.tmdbId === i.tmdbId && r.type === i.type);
+        for (const l of ['watchlist', 'ratings', 'passed']) {
+          for (const i of profile[l]) if (i.tmdbId && !has(l, i)) queueMark(l, i);
+        }
+        const remotePrefs = remote.prefs && Object.keys(remote.prefs).length;
+        if (!remotePrefs) queuePrefs();
+        await sync.flush();
+        adopt(await sync.pull());
+        return true;
+      },
+
+      // Send this device's changes, then take what's on TMDB.
+      async now() {
+        if (!sync?.signedIn) return false;
+        await sync.flush();
+        adopt(await sync.pull());
+        return true;
+      },
+      // Just send changes (after a tap), without reloading the lists.
+      push: () => (sync?.signedIn ? sync.flush() : Promise.resolve()),
+      signOut: () => sync.signOut(),
     },
   };
 }
@@ -241,6 +316,8 @@ export function browserStore(ls = safeStorage(), prefix = 'wtw.') {
       }
     },
     loadKey: () => { try { return ls.getItem(k('key')); } catch { return null; } },
+    loadSync: () => read('sync'),
+    saveSync: (v) => write('sync', v),
     saveKey: (key) => { try { ls.setItem(k('key'), key); } catch {} },
   };
 }

@@ -2,7 +2,7 @@ import { createApi, browserStore, safeStorage } from './lib/api.js';
 import { demoFetch } from './lib/demo.js';
 import { reasonsFor } from './lib/reasons.js';
 import { brand } from './lib/titles.js';
-import { BUILT_IN_KEY } from './lib/config.js';
+import { BUILT_IN_KEY, BUILT_IN_READ_TOKEN } from './lib/config.js';
 import { SORTS, RATINGS, RELEASED, defaultView, describeView, activeFilters } from './lib/filters.js';
 
 const $ = (s) => document.querySelector(s);
@@ -40,7 +40,11 @@ if (DEMO && !store.loadKey()) {
   store.saveKey('sample');
   store.saveProfile({ services: [8, 15], serviceBrands: ['netflix', 'hulu'] }); // so the rings show
 }
-const api = createApi({ store, fetchImpl: DEMO ? demoFetch : undefined, builtInKey: DEMO ? null : BUILT_IN_KEY });
+const api = createApi({
+  store, fetchImpl: DEMO ? demoFetch : undefined,
+  builtInKey: DEMO ? null : BUILT_IN_KEY,
+  readToken: DEMO ? null : BUILT_IN_READ_TOKEN, // sync between devices (not in sample mode)
+});
 const img = (size, path) => (path.startsWith('data:') ? path : `${IMG}/${size}${path}`);
 
 let status;
@@ -359,6 +363,7 @@ async function act(key, what, extra = {}) {
   updateTiles(next);
   if (stack.at(-1)?.key === key) renderSheet(true);
   refresh();
+  pushSoon();
   return { prev: m, next: mine };
 }
 
@@ -408,6 +413,7 @@ async function restore(key, prev) {
   updateTiles(back);
   if (stack.at(-1)?.key === key) renderSheet(true);
   refresh();
+  pushSoon();
 }
 
 document.addEventListener('click', async (e) => {
@@ -798,7 +804,112 @@ function renderStatus() {
 function refresh() {
   status = api.status();
   renderStatus();
+  renderSync();
 }
+
+// --- sync between devices (through the user's TMDB account) -------------------------
+let syncError = '';
+let syncPoll = null;
+let pushTimer = null;
+
+// Send changes a moment after a tap (taps in a row go together).
+function pushSoon() {
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => api.sync.push().then(renderSync, syncFailed), 800);
+}
+
+function syncFailed(e) {
+  syncError = e.code === 'signed-out' ? e.message : `Couldn't sync just now (${e.message}). It'll try again; nothing is lost.`;
+  if (e.code === 'signed-out') api.sync.signOut();
+  renderSync();
+}
+
+function ago(t) {
+  const m = Math.round((Date.now() - t) / 60000);
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : new Date(t).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+}
+
+function renderSync() {
+  const s = api.sync.status();
+  $('#sync-card').hidden = !s.available;
+  $('#sync-nudge').hidden = !s.available || s.signedIn;
+  if (!s.available) return;
+  let html;
+  if (s.signedIn) {
+    html = `<p>Your list and services are saved to private lists on your TMDB account, so every device you sign in on shows the same thing.</p>
+      <p class="msg ok">Synced${s.lastSync ? ` ${ago(s.lastSync)}` : ''}.${s.pending ? ` ${s.pending} change${s.pending === 1 ? '' : 's'} waiting to send.` : ''}</p>
+      <div class="row"><button id="sync-now">Sync now</button><button id="sync-out" class="link-btn">Sign out of sync</button></div>`;
+  } else if (s.waiting) {
+    html = `<p>Approve What to Watch on the TMDB page that opened, then come back here. This finishes on its own once you do.</p>
+      <div class="row"><button id="sync-check" class="primary">I've approved it</button><button id="sync-reopen">Open TMDB again</button><button id="sync-cancel" class="link-btn">Cancel</button></div>`;
+  } else {
+    html = `<p>Sign in with your TMDB account on each device (phone and computer) and your list stays the same everywhere. It saves to private lists on your account. Nothing else to set up.</p>
+      <div class="row"><button id="sync-in" class="primary">Sign in with TMDB</button></div>`;
+  }
+  $('#sync-body').innerHTML = html + (syncError ? `<p class="msg err">${esc(syncError)}</p>` : '');
+}
+
+async function startSync() {
+  syncError = '';
+  try {
+    const url = await api.sync.startSignIn(`${location.origin}${location.pathname}?tmdb-approved=1`);
+    renderSync();
+    // A new tab where we can; otherwise this page goes to TMDB and comes back.
+    const tab = window.open(url, '_blank');
+    if (tab) tab.opener = null;
+    else location.assign(url);
+    pollSignIn();
+  } catch (e) { syncFailed(e); }
+}
+
+// Check every few seconds (and whenever you come back to the app) until the
+// approval goes through.
+function pollSignIn() {
+  clearInterval(syncPoll);
+  syncPoll = setInterval(() => checkSignIn(true), 3000);
+  setTimeout(() => clearInterval(syncPoll), 15 * 60 * 1000);
+}
+
+async function checkSignIn(quiet = false) {
+  try {
+    if (!(await api.sync.finishSignIn())) {
+      if (!quiet) toast("TMDB hasn't got your approval yet. Tap Approve on the TMDB page.");
+      return;
+    }
+    clearInterval(syncPoll);
+    syncError = '';
+    toast('Synced. This device now shares your list.');
+    afterSync();
+  } catch (e) {
+    clearInterval(syncPoll);
+    syncFailed(e);
+  }
+}
+
+async function syncNow() {
+  syncError = '';
+  try { if (await api.sync.now()) afterSync(); } catch (e) { syncFailed(e); }
+}
+
+// Show what came in from the other device.
+function afterSync() {
+  refresh();
+  providerChoices = [];
+  loadProviders();
+  loadLogos();
+  if (view === 'list') loadList();
+  else if (view === 'find') rerunFind(); // titles marked on the other device drop off
+}
+
+$('#sync-body').addEventListener('click', async (e) => {
+  const id = e.target.closest('button')?.id;
+  if (id === 'sync-in' || id === 'sync-reopen') startSync();
+  else if (id === 'sync-check') checkSignIn();
+  else if (id === 'sync-now') { await syncNow(); if (!syncError) toast('Synced.'); }
+  else if (id === 'sync-cancel') { await api.sync.signOut(); clearInterval(syncPoll); renderSync(); }
+  else if (id === 'sync-out') { await api.sync.signOut(); toast('This device is no longer syncing. Your list stays here and on TMDB.'); renderSync(); }
+});
+$('#sync-nudge-btn').addEventListener('click', () => { openView('settings'); startSync(); });
 
 $('#key-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -894,6 +1005,17 @@ if (DEMO) {
 refresh();
 loadCategories();
 loadLogos();
+// Coming back from approving on TMDB, or just opening the app: sync.
+if (new URLSearchParams(location.search).has('tmdb-approved')) {
+  history.replaceState(null, '', location.pathname);
+  if (api.sync.status().waiting) checkSignIn(true);
+  else if (!api.sync.status().signedIn) toast('Approved. Switch back to the What to Watch app where you started signing in.');
+} else if (api.sync.status().waiting) {
+  checkSignIn(true);
+  pollSignIn();
+} else if (api.sync.status().signedIn) {
+  syncNow();
+}
 loadProviders();
 if (!status.hasKey) openView('settings');
 else openCategory('true-crime');
@@ -903,8 +1025,12 @@ else openCategory('true-crime');
 // list and settings are saved, so nothing is lost).
 let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) hiddenAt = Date.now();
-  else if (hiddenAt && Date.now() - hiddenAt > 15 * 60 * 1000 && !window.WTW_DEMO) location.reload();
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (hiddenAt && Date.now() - hiddenAt > 15 * 60 * 1000 && !window.WTW_DEMO) return location.reload();
+  // Back in the app: finish a sign-in, or pick up changes from the other device.
+  const s = api.sync.status();
+  if (s.waiting) checkSignIn(true);
+  else if (s.signedIn) syncNow();
 });
 
 // Ask the browser not to clear our storage (Safari otherwise can after a week

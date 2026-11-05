@@ -75,6 +75,9 @@
   </section>
 
   <section id="list" hidden>
+    <p id="sync-nudge" class="banner" hidden>
+      This list is only on this device. <button class="link-btn" id="sync-nudge-btn">Sync it with your TMDB account</button> to see it on your phone and computer.
+    </p>
     <div id="list-tabs" class="chips scroll"></div>
     <div id="list-grid" class="wall"></div>
     <p id="list-msg" class="msg"></p>
@@ -84,6 +87,11 @@
     <div class="shelf-row">
       <h2 class="shelf">Settings</h2>
       <button id="close-settings" class="link-btn">Done</button>
+    </div>
+
+    <div class="card sync-card" id="sync-card" hidden>
+      <h3>Sync your phone and computer</h3>
+      <div id="sync-body"></div>
     </div>
 
     <div class="card" id="key-card">

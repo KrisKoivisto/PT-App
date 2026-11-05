@@ -289,6 +289,11 @@ input[type=checkbox] { accent-color: var(--accent); }
 .providers { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin-top: 10px; }
 .prov { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; font-size: .84rem; cursor: pointer; }
 .prov img { width: 26px; height: 26px; border-radius: 6px; }
+.sync-card { border-color: var(--accent); }
+.sync-card .row { margin-top: 10px; }
+.card .link-btn { background: none; border: 0; padding: 6px 4px; }
+#sync-nudge { margin: 4px 0 12px; }
+#sync-nudge .link-btn { padding: 0; font-size: inherit; }
 .credits { color: var(--muted); font-size: .72rem; margin: 20px 0; }
 
 /* --- toast --- */

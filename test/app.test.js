@@ -80,7 +80,7 @@ async function setup(key = 'k', builtInKey = null) {
   await new Promise((r) => mock.listen(0, r));
   const store = memStore(key);
   const api = createApi({ store, base: `http://127.0.0.1:${mock.address().port}`, builtInKey });
-  return { api, store, close: () => mock.close() };
+  return { api, store, base: `http://127.0.0.1:${mock.address().port}`, close: () => mock.close() };
 }
 
 // --- finding where to watch ----------------------------------------------------------
@@ -467,6 +467,134 @@ test('every category but stand-up has subcategories, queried as genre AND topic'
     assert.deepEqual(matchCategories('haunted house movie').map((x) => x.label), ['Horror › Haunted houses']);
     assert.ok(matchCategories('time travel').some((x) => x.label === 'Sci-fi & fantasy › Time travel'));
   } finally { close(); }
+});
+
+// --- sync between devices ------------------------------------------------------------
+// A fake TMDB v4 (sign-in and lists) shared by two "devices".
+async function fakeTmdbAccount() {
+  const lists = new Map(); // id -> { name, description, public, items: [{media_type, id, ...}], comments: {} }
+  let nextList = 100;
+  let approved = false;
+  const READ = 'read-token';
+  const USER = 'user-token';
+  const server = http.createServer(async (req, res) => {
+    const u = new URL(req.url, 'http://x');
+    let body = '';
+    for await (const c of req) body += c;
+    const data = body ? JSON.parse(body) : {};
+    const auth = (req.headers.authorization ?? '').replace('Bearer ', '');
+    const send = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+    const p = u.pathname;
+    if (p === '/4/auth/request_token' && req.method === 'POST') return auth === READ ? send(200, { success: true, request_token: 'rt-1' }) : send(401, {});
+    if (p === '/4/auth/access_token' && req.method === 'POST') {
+      if (auth !== READ) return send(401, {});
+      return approved ? send(200, { success: true, access_token: USER, account_id: 'acct-1' })
+        : send(422, { success: false, status_code: 41, status_message: "This request token hasn't been approved by the user." });
+    }
+    if (p === '/4/auth/access_token' && req.method === 'DELETE') return send(200, { success: true });
+    if (auth !== USER) return send(401, { success: false, status_code: 3 });
+    if (p === '/4/account/acct-1/lists') {
+      return send(200, { page: 1, total_pages: 1, results: [...lists].map(([id, l]) => ({ id, name: l.name, description: l.description })) });
+    }
+    if (p === '/4/list' && req.method === 'POST') {
+      const id = nextList++;
+      lists.set(id, { name: data.name, description: data.description ?? '', public: data.public, items: [], comments: {} });
+      return send(201, { success: true, id });
+    }
+    const m = p.match(/^\/4\/list\/(\d+)(\/items)?$/);
+    const l = m && lists.get(Number(m[1]));
+    if (!l) return send(404, { success: false, status_code: 34 });
+    if (!m[2] && req.method === 'GET') {
+      const page = Number(u.searchParams.get('page') ?? 1);
+      const results = l.items.slice((page - 1) * 2, page * 2); // 2 per page, to exercise paging
+      return send(200, { results, comments: Object.fromEntries(results.map((x) => [`${x.media_type}:${x.id}`, l.comments[`${x.media_type}:${x.id}`] ?? null])),
+        description: l.description, page, total_pages: Math.max(1, Math.ceil(l.items.length / 2)), public: l.public });
+    }
+    if (!m[2] && req.method === 'PUT') { l.description = data.description; return send(200, { success: true }); }
+    const key = (x) => `${x.media_type}:${x.media_id}`;
+    if (req.method === 'POST') {
+      for (const x of data.items) if (!l.items.some((i) => `${i.media_type}:${i.id}` === key(x))) l.items.push({ media_type: x.media_type, id: x.media_id, title: `T${x.media_id}`, name: `T${x.media_id}`, poster_path: `/p${x.media_id}.jpg` });
+      return send(200, { success: true });
+    }
+    if (req.method === 'PUT') { for (const x of data.items) l.comments[key(x)] = x.comment; return send(200, { success: true }); }
+    if (req.method === 'DELETE') {
+      l.items = l.items.filter((i) => !data.items.some((x) => key(x) === `${i.media_type}:${i.id}`));
+      return send(200, { success: true });
+    }
+    send(404, {});
+  });
+  await new Promise((r) => server.listen(0, r));
+  return { lists, approve: () => { approved = true; }, base: `http://127.0.0.1:${server.address().port}`, close: () => server.close() };
+}
+
+const device = (tmdbBase, syncBase) => {
+  const store = memStore('k');
+  let syncState = null;
+  store.loadSync = () => syncState;
+  store.saveSync = (v) => { syncState = structuredClone(v); };
+  return { store, api: createApi({ store, base: tmdbBase, readToken: 'read-token', syncBase }) };
+};
+
+test('sync: phone and computer share one list through the TMDB account', async () => {
+  const { base: tmdbBase, close } = await setup();
+  const acct = await fakeTmdbAccount();
+  try {
+    const phone = device(tmdbBase, acct.base).api;
+    const computer = device(tmdbBase, acct.base).api;
+
+    // The phone already has a list before signing in
+    await phone.mark({ list: 'watchlist', type: 'tv', tmdbId: 3 });
+    await phone.mark({ list: 'ratings', type: 'movie', tmdbId: 1, reaction: 'love', reasons: ['Gripping case'], note: 'wow' });
+    phone.settings({ services: [8], serviceNames: ['Netflix'], kind: 'limited' });
+
+    // Sign in: waits for approval, then merges
+    await phone.sync.startSignIn('https://app/?tmdb-approved=1');
+    assert.equal(phone.sync.status().waiting, true);
+    assert.equal(await phone.sync.finishSignIn(), false, 'not approved yet');
+    acct.approve();
+    assert.equal(await phone.sync.finishSignIn(), true);
+    assert.equal(phone.sync.status().signedIn, true);
+    const names = [...acct.lists.values()].map((l) => l.name).sort();
+    assert.deepEqual(names, ['What to Watch · Bookmarked', 'What to Watch · Passed', 'What to Watch · Seen', 'What to Watch · Settings']);
+    assert.ok([...acct.lists.values()].every((l) => l.public === false), 'private lists');
+
+    // The computer signs in and gets everything, including how it was and the services
+    await computer.sync.startSignIn('https://app/');
+    assert.equal(await computer.sync.finishSignIn(), true);
+    assert.deepEqual(computer.status().counts, { want: 1, seen: 1, passed: 0 });
+    const seen = (await computer.list('seen')).items[0];
+    assert.equal(seen.title, 'Vault Job');
+    assert.deepEqual(seen.mine, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', want: false, passed: false });
+    assert.deepEqual([computer.status().services, computer.status().kind], [[8], 'limited']);
+    assert.equal(acct.lists.size, 4, 'the computer reused the same lists');
+
+    // Changes on the computer show up on the phone after a sync
+    await computer.mark({ list: 'passed', type: 'tv', tmdbId: 3 }); // passing takes it off Bookmarked too
+    await computer.mark({ list: 'ratings', type: 'movie', tmdbId: 1, reaction: 'dislike' });
+    await computer.sync.push();
+    await phone.sync.now();
+    assert.deepEqual(phone.status().counts, { want: 0, seen: 1, passed: 1 });
+    assert.equal((await phone.list('seen')).items[0].mine.reaction, 'dislike');
+
+    // Unmarking and deleting carry over too
+    phone.unmark({ list: 'passed', type: 'tv', tmdbId: 3 });
+    await phone.sync.push();
+    await computer.sync.now();
+    assert.equal(computer.status().counts.passed, 0);
+    computer.reset();
+    await computer.sync.push();
+    await phone.sync.now();
+    assert.deepEqual(phone.status().counts, { want: 0, seen: 0, passed: 0 });
+
+    // Changes made while TMDB can't be reached wait and go later
+    acct.close();
+    await phone.mark({ list: 'watchlist', type: 'movie', tmdbId: 2 });
+    await assert.rejects(phone.sync.push());
+    assert.equal(phone.sync.status().pending, 2, 'kept for later (add to Bookmarked, take off Passed)');
+
+    await phone.sync.signOut();
+    assert.equal(phone.sync.status().signedIn, false);
+  } finally { close(); acct.close(); }
 });
 
 test('static server serves the app and nothing outside it', async () => {
