@@ -186,15 +186,16 @@ input[type=checkbox] { accent-color: var(--accent); }
 .pad-x { padding-left: var(--gl); padding-right: var(--gr); }
 
 /* One-tap marks under every poster, and bigger at the top of the detail screen */
-.quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 6px; }
+.quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; margin-top: 6px; }
 .q {
   height: 34px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 8px;
   background: var(--surface); color: var(--muted);
 }
-.q .i { width: 18px; height: 18px; stroke-width: 2.2; }
+.q .i { width: 17px; height: 17px; stroke-width: 2.2; }
 .q span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .q.seen.on { background: var(--yours); border-color: var(--yours); color: var(--on-accent); }
 .q.want.on { background: var(--want); border-color: var(--want); color: var(--on-accent); }
+.q.maybe.on { background: var(--like); border-color: var(--like); color: var(--on-accent); }
 .q.pass.on { background: var(--dislike); border-color: var(--dislike); color: var(--on-accent); }
 .quick.big { gap: 8px; margin-top: 0; }
 .quick.big .q { height: auto; display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 2px 9px; border-radius: 12px; font-size: .74rem; }

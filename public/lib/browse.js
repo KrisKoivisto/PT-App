@@ -222,7 +222,7 @@ export async function browse(tmdb, profile, { category, sub = null, page = 1 }) 
   // Movies and shows mixed in the chosen order, minus anything you've
   // already marked (seen, bookmarked or passed).
   const found = [...byKey.values()].sort((a, b) => b.rank - a.rank);
-  const seen = seenSet([...profile.ratings, ...profile.watchlist, ...(profile.passed ?? [])]);
+  const seen = seenSet([...profile.ratings, ...profile.watchlist, ...(profile.maybe ?? []), ...(profile.passed ?? [])]);
   const items = (await detail(tmdb, profile, found)).filter((i) => !isSeen(seen, i));
   return { items, page, totalPages, category: cat.name, sub: subcat?.name ?? null };
 }

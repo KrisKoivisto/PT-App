@@ -2,7 +2,9 @@
 // in four private lists on TMDB, so the phone and the computer see the same
 // list. No server of ours, no new account.
 //
-//   What to Watch · Bookmarked   watchlist
+//   What to Watch · Bookmarked   "Gotta watch" (the name predates Maybe; kept so
+//                                existing synced lists carry on)
+//   What to Watch · Maybe        "Maybe"
 //   What to Watch · Seen         seen, with how it was in each item's comment
 //   What to Watch · Passed       passed
 //   What to Watch · Settings     empty; its description holds services etc.
@@ -12,11 +14,12 @@
 
 const NAMES = {
   want: 'What to Watch · Bookmarked',
+  maybe: 'What to Watch · Maybe',
   seen: 'What to Watch · Seen',
   passed: 'What to Watch · Passed',
   settings: 'What to Watch · Settings',
 };
-export const REMOTE_OF = { watchlist: 'want', ratings: 'seen', passed: 'passed' };
+export const REMOTE_OF = { watchlist: 'want', maybe: 'maybe', ratings: 'seen', passed: 'passed' };
 
 const fail = (message, code) => Object.assign(new Error(message), { code });
 
@@ -140,13 +143,14 @@ export function createSync({ readToken, store, base = 'https://api.themoviedb.or
   // Everything on TMDB, in the app's own shape.
   async function pull() {
     const ids = await ensureLists();
-    const [want, seen, passed, settings] = await Promise.all(['want', 'seen', 'passed', 'settings'].map((k) => readList(ids[k])));
+    const [want, maybe, seen, passed, settings] = await Promise.all(['want', 'maybe', 'seen', 'passed', 'settings'].map((k) => readList(ids[k])));
     let prefs = null;
     try { prefs = JSON.parse(settings.description || '{}'); } catch {}
     state.lastSync = Date.now();
     save();
     return {
       watchlist: want.items.map(toLocal),
+      maybe: maybe.items.map(toLocal),
       ratings: seen.items.map((x) => ({ ...toLocal(x), ...decodeSeen(seen.comments[`${x.media_type}:${x.id}`]) })),
       passed: passed.items.map(toLocal),
       prefs,

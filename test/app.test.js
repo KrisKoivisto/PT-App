@@ -210,11 +210,11 @@ test('one-tap marks: seen, bookmark, pass, and how they replace each other', asy
     // Seen it: one tap, no rating needed; takes it off the bookmarks
     m = (await api.mark({ list: 'ratings', type: 'tv', tmdbId: 3, reaction: 'seen' })).mine;
     assert.deepEqual([m.reaction, m.want, m.passed], ['seen', false, false]);
-    assert.deepEqual(api.status().counts, { want: 1, seen: 1, passed: 0 });
+    assert.deepEqual(api.status().counts, { want: 1, maybe: 0, seen: 1, passed: 0 });
 
     // How was it (optional) with reasons; replaces, never duplicates
     m = (await api.mark({ list: 'ratings', type: 'tv', tmdbId: 3, reaction: 'love', reasons: ['Gripping case', ' ', 5], note: ' wow ' })).mine;
-    assert.deepEqual(m, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', want: false, passed: false });
+    assert.deepEqual(m, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', want: false, maybe: false, passed: false });
     assert.equal(store.saved.profile.ratings.length, 1);
 
     // Pass undoes seen and bookmark; bookmarking undoes pass
@@ -222,13 +222,13 @@ test('one-tap marks: seen, bookmark, pass, and how they replace each other', asy
     assert.deepEqual([m.reaction, m.want, m.passed], [null, false, true]);
     m = (await api.mark({ list: 'passed', type: 'movie', tmdbId: 4 })).mine;
     assert.deepEqual([m.want, m.passed], [false, true]);
-    assert.deepEqual(api.status().counts, { want: 0, seen: 0, passed: 2 });
+    assert.deepEqual(api.status().counts, { want: 0, maybe: 0, seen: 0, passed: 2 });
     assert.deepEqual((await api.list('passed')).items.map((i) => i.title), ['Nowhere Doc', 'Cold Trail']);
     m = (await api.mark({ list: 'watchlist', type: 'movie', tmdbId: 4 })).mine;
     assert.deepEqual([m.want, m.passed], [true, false]);
 
     api.unmark({ list: 'passed', type: 'tv', tmdbId: 3 });
-    assert.deepEqual(api.status().counts, { want: 1, seen: 0, passed: 0 });
+    assert.deepEqual(api.status().counts, { want: 1, maybe: 0, seen: 0, passed: 0 });
 
     await assert.rejects(api.mark({ list: 'ratings', type: 'movie', tmdbId: 1 }), /how you felt/);
     await assert.rejects(api.mark({ list: 'ratings', type: 'movie', tmdbId: 12345, reaction: 'seen' }), /no such title/);
@@ -249,11 +249,35 @@ test('seen and passed titles drop out of categories, but not search', async () =
   } finally { close(); }
 });
 
+test('Gotta watch and Maybe: one or the other, and seen or passed clears both', async () => {
+  const { api, close } = await setup();
+  try {
+    let m = (await api.mark({ list: 'maybe', type: 'movie', tmdbId: 1 })).mine;
+    assert.deepEqual([m.want, m.maybe], [false, true]);
+    assert.deepEqual((await api.list('maybe')).items.map((i) => i.title), ['Vault Job']);
+    m = (await api.mark({ list: 'watchlist', type: 'movie', tmdbId: 1 })).mine;
+    assert.deepEqual([m.want, m.maybe], [true, false], 'Gotta watch replaces Maybe');
+    m = (await api.mark({ list: 'maybe', type: 'movie', tmdbId: 1 })).mine;
+    assert.deepEqual([m.want, m.maybe], [false, true], 'and the other way round');
+    m = (await api.mark({ list: 'ratings', type: 'movie', tmdbId: 1, reaction: 'seen' })).mine;
+    assert.deepEqual([m.reaction, m.want, m.maybe], ['seen', false, false], 'seeing it clears both');
+    await api.mark({ list: 'maybe', type: 'tv', tmdbId: 3 });
+    m = (await api.mark({ list: 'passed', type: 'tv', tmdbId: 3 })).mine;
+    assert.deepEqual([m.maybe, m.passed], [false, true], 'passing clears Maybe');
+    assert.deepEqual(api.status().counts, { want: 0, maybe: 0, seen: 1, passed: 1 });
+
+    // Maybe titles drop out of categories like any other mark
+    await api.mark({ list: 'maybe', type: 'movie', tmdbId: 2 });
+    const r = await api.browse({ category: 'true-crime' });
+    assert.ok(!r.items.some((i) => i.tmdbId === 2));
+  } finally { close(); }
+});
+
 test('lists saved by older versions still count as seen', () => {
   const store = memStore('k');
   store.saved.profile = { ratings: [{ tmdbId: 1, type: 'movie', rating: 9 }, { tmdbId: 2, type: 'movie', rating: 6 }], watchlist: [] };
   const api = createApi({ store, base: 'http://127.0.0.1:1' });
-  assert.deepEqual(api.status().counts, { want: 0, seen: 2, passed: 0 });
+  assert.deepEqual(api.status().counts, { want: 0, maybe: 0, seen: 2, passed: 0 });
 });
 
 test('built-in key works with nothing saved, so no setup is needed', async () => {
@@ -285,7 +309,7 @@ test('key check, backup and restore', async () => {
     assert.ok(!backup.includes('good'), 'the key stays out of backups');
     api.reset();
     assert.equal(api.status().counts.seen, 0);
-    assert.deepEqual(api.importData(backup), { ratings: 1, watchlist: 0, passed: 0 });
+    assert.deepEqual(api.importData(backup), { ratings: 1, watchlist: 0, maybe: 0, passed: 0 });
     assert.equal(store.saved.profile.ratings[0].reasons[0], 'Bingeable');
     assert.throws(() => api.importData('{"hello":1}'), /backup/);
   } finally { close(); }
@@ -555,26 +579,39 @@ test('sync: phone and computer share one list through the TMDB account', async (
     assert.equal(await phone.sync.finishSignIn(), true);
     assert.equal(phone.sync.status().signedIn, true);
     const names = [...acct.lists.values()].map((l) => l.name).sort();
-    assert.deepEqual(names, ['What to Watch · Bookmarked', 'What to Watch · Passed', 'What to Watch · Seen', 'What to Watch · Settings']);
+    assert.deepEqual(names, ['What to Watch · Bookmarked', 'What to Watch · Maybe', 'What to Watch · Passed', 'What to Watch · Seen', 'What to Watch · Settings']);
     assert.ok([...acct.lists.values()].every((l) => l.public === false), 'private lists');
 
     // The computer signs in and gets everything, including how it was and the services
     await computer.sync.startSignIn('https://app/');
     assert.equal(await computer.sync.finishSignIn(), true);
-    assert.deepEqual(computer.status().counts, { want: 1, seen: 1, passed: 0 });
+    assert.deepEqual(computer.status().counts, { want: 1, maybe: 0, seen: 1, passed: 0 });
     const seen = (await computer.list('seen')).items[0];
     assert.equal(seen.title, 'Vault Job');
-    assert.deepEqual(seen.mine, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', want: false, passed: false });
+    assert.deepEqual(seen.mine, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', want: false, maybe: false, passed: false });
     assert.deepEqual([computer.status().services, computer.status().kind], [[8], 'limited']);
-    assert.equal(acct.lists.size, 4, 'the computer reused the same lists');
+    assert.equal(acct.lists.size, 5, 'the computer reused the same lists');
 
     // Changes on the computer show up on the phone after a sync
     await computer.mark({ list: 'passed', type: 'tv', tmdbId: 3 }); // passing takes it off Bookmarked too
     await computer.mark({ list: 'ratings', type: 'movie', tmdbId: 1, reaction: 'dislike' });
     await computer.sync.push();
     await phone.sync.now();
-    assert.deepEqual(phone.status().counts, { want: 0, seen: 1, passed: 1 });
+    assert.deepEqual(phone.status().counts, { want: 0, maybe: 0, seen: 1, passed: 1 });
     assert.equal((await phone.list('seen')).items[0].mine.reaction, 'dislike');
+
+    // Maybe syncs too, and moving a title from Maybe to Gotta watch carries over
+    await computer.mark({ list: 'maybe', type: 'movie', tmdbId: 2 });
+    await computer.sync.push();
+    await phone.sync.now();
+    assert.equal(phone.status().counts.maybe, 1);
+    await phone.mark({ list: 'watchlist', type: 'movie', tmdbId: 2 });
+    await phone.sync.push();
+    await computer.sync.now();
+    assert.deepEqual([computer.status().counts.want, computer.status().counts.maybe], [1, 0]);
+    computer.unmark({ list: 'watchlist', type: 'movie', tmdbId: 2 });
+    await computer.sync.push();
+    await phone.sync.now();
 
     // Unmarking and deleting carry over too
     phone.unmark({ list: 'passed', type: 'tv', tmdbId: 3 });
@@ -584,13 +621,13 @@ test('sync: phone and computer share one list through the TMDB account', async (
     computer.reset();
     await computer.sync.push();
     await phone.sync.now();
-    assert.deepEqual(phone.status().counts, { want: 0, seen: 0, passed: 0 });
+    assert.deepEqual(phone.status().counts, { want: 0, maybe: 0, seen: 0, passed: 0 });
 
     // Changes made while TMDB can't be reached wait and go later
     acct.close();
     await phone.mark({ list: 'watchlist', type: 'movie', tmdbId: 2 });
     await assert.rejects(phone.sync.push());
-    assert.equal(phone.sync.status().pending, 2, 'kept for later (add to Bookmarked, take off Passed)');
+    assert.equal(phone.sync.status().pending, 3, 'kept for later (add to Gotta watch, take off Maybe and Passed)');
 
     await phone.sync.signOut();
     assert.equal(phone.sync.status().signedIn, false);

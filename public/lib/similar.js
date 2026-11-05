@@ -98,7 +98,7 @@ export async function moreLikeThis(tmdb, profile, type, id, { limit = 20 } = {})
   // 3. Shortlist by the tags we already know they share (sharing two counts
   // for a lot more than one), then look at each candidate's full tag list.
   const pre = (c) => [...c.hits].reduce((s, h) => s + (weight.get(h) ?? 0.5), 0) * (1 + 0.5 * (c.hits.size - 1)) + (c.rec ? 0.4 : 0);
-  const skip = seenSet([...profile.ratings, ...profile.watchlist, ...(profile.passed ?? [])]);
+  const skip = seenSet([...profile.ratings, ...profile.watchlist, ...(profile.maybe ?? []), ...(profile.passed ?? [])]);
   const shortlist = [...cands.values()].sort((a, b) => pre(b) - pre(a)).slice(0, 60);
   const items = (await detail(tmdb, profile, shortlist)).filter((i) => !isSeen(skip, i));
 

@@ -3,7 +3,7 @@
 A phone app that does two things:
 
 1. **Tells you where something is streaming.** Search a title, an actor, or what it's about ("bank heist", "nurse who killed patients"), or browse a category. True crime splits into subcategories like Love gone wrong, Heists & robberies, and Con artists & scams. Every poster shows the services streaming it, with a green ring on the ones you have. Tap a poster for every way to watch it and the cast. Tap an actor for everything they're in.
-2. **Keeps your list.** Every poster has three one-tap buttons: ✓ Seen it, Bookmark, ✕ Pass. Tap one and the poster leaves the Find screen and everything moves up (Undo puts it back); categories top themselves up as you clear them. My list shows Bookmarked, Seen and Passed. On the detail screen you can also say how it was (Loved it, Liked it, Not for me), with quick reasons that fit the kind of show.
+2. **Keeps your list.** Every poster has four one-tap buttons: ✓ Seen it, Gotta watch, Maybe, ✕ Pass. Gotta watch and Maybe are the two bookmarks (one or the other). Tap one and the poster leaves the Find screen and everything moves up (Undo puts it back); categories top themselves up as you clear them. My list shows Bookmarked, Seen and Passed. On the detail screen you can also say how it was (Loved it, Liked it, Not for me), with quick reasons that fit the kind of show.
 
 It doesn't log in to any streaming service.
 
@@ -20,7 +20,7 @@ A TMDB key (TMDB is the movie database it looks things up in) is built in at `pu
 
 ## Where your data lives
 
-On your device, and, once you sign in with TMDB (Settings → Sync your phone and computer), in four private lists on your own TMDB account: "What to Watch · Bookmarked", "· Seen" (how it was, reasons and note in each item's comment), "· Passed", and "· Settings" (your services and filters, in its description). Sign in on each device and they all show the same list. Changes go up a moment after each tap and come down whenever you open or return to the app; changes made offline wait and go later. There's no server of ours; the app talks straight to TMDB.
+On your device, and, once you sign in with TMDB (Settings → Sync your phone and computer), in five private lists on your own TMDB account: "What to Watch · Bookmarked" (Gotta watch), "· Maybe", "· Seen" (how it was, reasons and note in each item's comment), "· Passed", and "· Settings" (your services and filters, in its description). Sign in on each device and they all show the same list. Changes go up a moment after each tap and come down whenever you open or return to the app; changes made offline wait and go later. There's no server of ours; the app talks straight to TMDB.
 
 ## How it's built
 

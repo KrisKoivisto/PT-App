@@ -17,6 +17,7 @@ function index(list) {
 export function annotate(profile, items) {
   const rated = index(profile.ratings);
   const want = index(profile.watchlist);
+  const maybe = index(profile.maybe ?? []);
   const passed = index(profile.passed ?? []);
   return items.map((it) => {
     const k = keys(it);
@@ -28,6 +29,7 @@ export function annotate(profile, items) {
         reasons: r?.reasons ?? [],
         note: r?.note ?? '',
         want: k.some((x) => want.has(x)),
+        maybe: k.some((x) => maybe.has(x)),
         passed: k.some((x) => passed.has(x)),
       },
     };

@@ -29,6 +29,8 @@ const PATHS = {
   back: '<path d="m15 5-7 7 7 7"/>',
   star: '<path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6-4.5-4.2 6.1-.7z"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7"/>',
+  // a bookmark with a question mark: "maybe"
+  maybe: '<path d="M6 3h12v18l-6-4-6 4z"/><path d="M10 8.6a2 2 0 1 1 2.6 1.9c-.4.1-.6.5-.6.9v.6M12 13.9v.1"/>',
 };
 const icon = (name, filled = false) => `<svg class="i${filled ? ' fill' : ''}" viewBox="0 0 24 24" aria-hidden="true">${PATHS[name]}</svg>`;
 
@@ -98,12 +100,13 @@ const logoImg = (p, size = 'w92') => (p.logo
   : `<span class="logo-text">${esc(p.name.slice(0, 2))}</span>`);
 
 // --- poster tiles --------------------------------------------------------------
-// The three one-tap marks on every poster, also at the top of the detail screen.
+// The four one-tap marks on every poster, also at the top of the detail screen.
 function quickButtons(m, attr) {
   const seen = !!m.reaction;
   return [
     ['seen', 'Seen it', 'Seen', 'check', seen],
-    ['want', 'Bookmark', 'Bookmarked', 'bookmark', !!m.want],
+    ['want', 'Gotta watch', 'Gotta watch', 'bookmark', !!m.want],
+    ['maybe', 'Maybe', 'Maybe', 'maybe', !!m.maybe],
     ['pass', 'Pass', 'Passed', 'x', !!m.passed],
   ].map(([k, label, onLabel, ic, on]) =>
     `<button ${attr}="${k}" class="q ${k}${on ? ' on' : ''}" aria-pressed="${on}" aria-label="${on ? onLabel : label}">${icon(ic, on && ic === 'bookmark')}<span>${on ? onLabel : label}</span></button>`).join('');
@@ -342,6 +345,11 @@ async function act(key, what, extra = {}) {
       api.unmark({ ...ref, list: 'watchlist' });
       mine = { ...m, want: false };
     } else mine = (await api.mark({ ...ref, list: 'watchlist' })).mine;
+  } else if (what === 'maybe') {
+    if (m.maybe) {
+      api.unmark({ ...ref, list: 'maybe' });
+      mine = { ...m, maybe: false };
+    } else mine = (await api.mark({ ...ref, list: 'maybe' })).mine;
   } else if (what === 'pass') {
     if (m.passed) {
       api.unmark({ ...ref, list: 'passed' });
@@ -367,15 +375,15 @@ async function act(key, what, extra = {}) {
   return { prev: m, next: mine };
 }
 
-const DONE_MSG = { seen: 'Marked seen.', want: 'Bookmarked.', pass: 'Passed.' };
+const DONE_MSG = { seen: 'Marked seen.', want: 'Added to Gotta watch.', maybe: 'Added to Maybe.', pass: 'Passed.' };
 
 // Seen, bookmark or pass from a poster: the title leaves the Find screen (and
 // a More like this list), everything below moves up, and Undo puts it back.
 // On My list it leaves the tab it no longer belongs to.
 async function quick(key, what) {
   const { prev, next } = await act(key, what);
-  const marked = next.reaction || next.want || next.passed;
-  const belongs = { want: next.want, seen: !!next.reaction, passed: next.passed }[listShow];
+  const marked = next.reaction || next.want || next.maybe || next.passed;
+  const belongs = { want: next.want, maybe: next.maybe, seen: !!next.reaction, passed: next.passed }[listShow];
   const leaving = [...document.querySelectorAll(`.tile[data-key="${key}"]`)].filter((el) =>
     (el.closest('[data-clear]') && marked) || (el.closest('#list-grid') && !belongs));
   if (!leaving.length) return;
@@ -403,10 +411,11 @@ function removeTile(el) {
 async function restore(key, prev) {
   const it = items.get(key);
   const ref = { type: it.type, tmdbId: it.tmdbId, imdbId: it.imdbId };
-  for (const list of ['ratings', 'watchlist', 'passed']) api.unmark({ ...ref, list });
-  let mine = { reaction: null, reasons: [], note: '', want: false, passed: false };
+  for (const list of ['ratings', 'watchlist', 'maybe', 'passed']) api.unmark({ ...ref, list });
+  let mine = { reaction: null, reasons: [], note: '', want: false, maybe: false, passed: false };
   if (prev.reaction) mine = await saveRating(it, prev.reaction, prev.reasons, prev.note);
   if (prev.want) mine = (await api.mark({ ...ref, list: 'watchlist' })).mine;
+  if (prev.maybe) mine = (await api.mark({ ...ref, list: 'maybe' })).mine;
   if (prev.passed) mine = (await api.mark({ ...ref, list: 'passed' })).mine;
   const back = { ...it, mine };
   items.set(key, back);
@@ -422,7 +431,7 @@ document.addEventListener('click', async (e) => {
   const r = e.target.closest('#sheet-body [data-reason]');
   try {
     if (q) return await quick(q.closest('.tile').dataset.key, q.dataset.quick);
-    if (a) return await (['seen', 'want', 'pass'].includes(a.dataset.act) ? quick : act)(stack.at(-1).key, a.dataset.act);
+    if (a) return await (['seen', 'want', 'maybe', 'pass'].includes(a.dataset.act) ? quick : act)(stack.at(-1).key, a.dataset.act);
     if (r) return await act(stack.at(-1).key, 'reason', { reason: r.dataset.reason, note: $('#note')?.value });
   } catch (err) { return toast(err.message); }
   const t = e.target.closest('[data-open]');
@@ -743,9 +752,10 @@ $('#search-form').addEventListener('submit', (e) => {
 $('#more').addEventListener('click', () => { browseState.page++; loadBrowse(true); });
 
 // --- my list ----------------------------------------------------------------------
-const LIST_TABS = { want: 'Bookmarked', seen: 'Seen', passed: 'Passed' };
+const LIST_TABS = { want: 'Gotta watch', maybe: 'Maybe', seen: 'Seen', passed: 'Passed' };
 const LIST_EMPTY = {
-  want: 'Nothing bookmarked yet. Tap the bookmark under any poster.',
+  want: 'Nothing here yet. Tap the bookmark under any poster you gotta watch.',
+  maybe: 'Nothing here yet. Tap the bookmark with the ? under anything you might watch.',
   seen: "Nothing marked seen yet. Tap the check under any poster you've watched.",
   passed: 'Nothing passed yet. Tap the ✕ under anything you never want to see again.',
 };
@@ -766,7 +776,7 @@ async function loadList() {
     renderWall('#list-grid', list);
     if (!list.length) return show('#list-msg', LIST_EMPTY[listShow]);
     const streaming = list.filter((i) => i.services.length).length;
-    show('#list-msg', listShow === 'want' && status.services.length
+    show('#list-msg', (listShow === 'want' || listShow === 'maybe') && status.services.length
       ? `${streaming} of ${list.length} streaming on your services now.`
       : '');
   } catch (e) { show('#list-msg', e.message, true); }
@@ -797,7 +807,7 @@ function renderStatus() {
   $('#key-card').hidden = DEMO || (status.hasKey && !keyRejected);
   $('#key-state').textContent = status.ownKey ? 'Using the key you pasted on this phone. ✓' : '';
   renderFilterBar();
-  const total = status.counts.want + status.counts.seen;
+  const total = status.counts.want + status.counts.maybe + status.counts.seen;
   $('#list-count').textContent = total || '';
 }
 

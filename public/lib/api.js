@@ -6,8 +6,16 @@ import { cleanView, defaultView } from './filters.js';
 import { createSync, encodeSeen, REMOTE_OF } from './sync.js';
 import { REACTIONS, annotate } from './mine.js';
 
-export const defaultProfile = () => ({ region: 'US', kind: 'all', view: defaultView(), services: [], serviceBrands: [], ratings: [], watchlist: [], passed: [] });
-const LISTS = ['ratings', 'watchlist', 'passed'];
+export const defaultProfile = () => ({ region: 'US', kind: 'all', view: defaultView(), services: [], serviceBrands: [], ratings: [], watchlist: [], maybe: [], passed: [] });
+// watchlist = "Gotta watch", maybe = "Maybe" (the two bookmarks).
+const LISTS = ['ratings', 'watchlist', 'maybe', 'passed'];
+// Marking a title on one list takes it off these.
+const DROPS = {
+  ratings: ['watchlist', 'maybe', 'passed'],
+  passed: ['watchlist', 'maybe', 'ratings'],
+  watchlist: ['maybe', 'passed'],
+  maybe: ['watchlist', 'passed'],
+};
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const clean = (s, max) => (typeof s === 'string' ? s.trim().slice(0, max) : '');
@@ -35,7 +43,7 @@ export function createApi({ store, base, fetchImpl, builtInKey = null, readToken
   // The remote side of marking a title: same moves as the local lists.
   function queueMark(list, item) {
     if (!sync?.signedIn) return;
-    const others = { ratings: ['watchlist', 'passed'], passed: ['watchlist', 'ratings'], watchlist: ['passed'] }[list];
+    const others = DROPS[list];
     sync.queue(
       { kind: 'add', list: REMOTE_OF[list], item, comment: list === 'ratings' ? encodeSeen(item) : undefined },
       ...others.map((l) => ({ kind: 'remove', list: REMOTE_OF[l], item })),
@@ -44,6 +52,7 @@ export function createApi({ store, base, fetchImpl, builtInKey = null, readToken
   // Replace the local lists with what's on TMDB (after sending local changes).
   function adopt(remote) {
     profile.watchlist = remote.watchlist;
+    profile.maybe = remote.maybe;
     profile.ratings = remote.ratings;
     profile.passed = remote.passed;
     const p = remote.prefs;
@@ -70,7 +79,7 @@ export function createApi({ store, base, fetchImpl, builtInKey = null, readToken
     },
 
     status() {
-      const counts = { want: profile.watchlist.length, seen: profile.ratings.length, passed: profile.passed.length };
+      const counts = { want: profile.watchlist.length, maybe: profile.maybe.length, seen: profile.ratings.length, passed: profile.passed.length };
       return { hasKey: !!tmdb, ownKey: !!store.loadKey(), kind: profile.kind, view: cleanView(profile.view), region: profile.region, services: profile.services, serviceBrands: profile.serviceBrands, counts };
     },
 
@@ -149,7 +158,7 @@ export function createApi({ store, base, fetchImpl, builtInKey = null, readToken
     // Your list: bookmarked, seen, or passed, newest first, with where each
     // one streams now.
     async list(show = 'want') {
-      const src = { want: profile.watchlist, seen: profile.ratings, passed: profile.passed }[show];
+      const src = { want: profile.watchlist, maybe: profile.maybe, seen: profile.ratings, passed: profile.passed }[show];
       if (!src) throw fail('Unknown list.');
       const t = needKey();
       const items = (await pool(src.filter((i) => i.tmdbId).reverse(), 8, async (i) => {
@@ -189,7 +198,7 @@ export function createApi({ store, base, fetchImpl, builtInKey = null, readToken
       }
       const same = (i) => (i.tmdbId === tmdbId && i.type === type) || (item.imdbId && i.imdbId === item.imdbId);
       profile[list] = [...profile[list].filter((i) => !same(i)), item];
-      const drop = { ratings: ['watchlist', 'passed'], passed: ['watchlist', 'ratings'], watchlist: ['passed'] }[list];
+      const drop = DROPS[list];
       for (const l of drop) profile[l] = profile[l].filter((i) => !same(i));
       save();
       queueMark(list, item);
@@ -219,16 +228,17 @@ export function createApi({ store, base, fetchImpl, builtInKey = null, readToken
         serviceBrands: Array.isArray(p.serviceBrands) ? p.serviceBrands : [],
         ratings: Array.isArray(p.ratings) ? p.ratings : [],
         watchlist: Array.isArray(p.watchlist) ? p.watchlist : [],
+        maybe: Array.isArray(p.maybe) ? p.maybe : [],
         passed: Array.isArray(p.passed) ? p.passed : [],
       });
       save();
-      return { ratings: profile.ratings.length, watchlist: profile.watchlist.length, passed: profile.passed.length };
+      return { ratings: profile.ratings.length, watchlist: profile.watchlist.length, maybe: profile.maybe.length, passed: profile.passed.length };
     },
 
     reset() {
       // Deleting your list deletes it everywhere you're signed in.
       if (sync?.signedIn) {
-        for (const l of ['watchlist', 'ratings', 'passed']) {
+        for (const l of ['watchlist', 'maybe', 'ratings', 'passed']) {
           for (const i of profile[l]) if (i.tmdbId) sync.queue({ kind: 'remove', list: REMOTE_OF[l], item: i });
         }
       }
@@ -247,7 +257,7 @@ export function createApi({ store, base, fetchImpl, builtInKey = null, readToken
         if (!(await sync.finishSignIn())) return false;
         const remote = await sync.pull();
         const has = (l, i) => remote[l].some((r) => r.tmdbId === i.tmdbId && r.type === i.type);
-        for (const l of ['watchlist', 'ratings', 'passed']) {
+        for (const l of ['watchlist', 'maybe', 'ratings', 'passed']) {
           for (const i of profile[l]) if (i.tmdbId && !has(l, i)) queueMark(l, i);
         }
         const remotePrefs = remote.prefs && Object.keys(remote.prefs).length;
