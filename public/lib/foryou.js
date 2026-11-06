@@ -2,7 +2,7 @@ import { pool } from './tmdb.js';
 import { seenSet, isSeen } from './titles.js';
 import { detail, matchesKind } from './browse.js';
 import { cleanView, applyView, discoverParams } from './filters.js';
-import { GENERIC, moodFactor, isMood, isBroad, idf } from './similar.js';
+import { GENERIC, moodFactor, isMood, isCommon, idf } from './similar.js';
 import { scoreOf } from './mine.js';
 
 const MIN_VOTES = { movie: 50, tv: 15 };
@@ -122,7 +122,7 @@ export async function forYou(tmdb, profile, { limit = 30 } = {}) {
     const w = (k) => rar(k.id) * moodFactor(k) * (t.central.get(k.id) ?? 0.5);
     // Two story tags in common, and one of them has to be specific: "true
     // crime" plus "detective" is half of TMDB, "true crime" plus "nurse" isn't.
-    const specific = story.filter((k) => !isBroad(k) && !REAL.includes(k.id));
+    const specific = story.filter((k) => !isCommon(k) && !REAL.includes(k.id));
     if (story.length < 2 || !specific.length || story.reduce((sum, k) => sum + w(k), 0) < 0.8) return 0;
     const sameGenre = (i.genres ?? []).filter((g) => t.genres.has(g)).length;
     let v = (shared.reduce((sum, k) => sum + w(k), 0) + 0.25 * sameGenre) / (1 + (i.keywords?.length ?? 0) / 60);

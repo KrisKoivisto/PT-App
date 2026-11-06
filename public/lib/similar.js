@@ -20,14 +20,17 @@ export const isMood = (k) => MOODS.has(k.name.toLowerCase());
 
 // Settings and broad themes ("new jersey", "friendship") are true of the
 // title but rarely why you'd want another one like it.
-const BROAD = new Set(['friendship', 'love', 'family', 'death', 'money', 'police', 'small town',
-  'usa', 'united states', 'detective', 'investigation', 'criminal', 'crime', 'murder', 'killer', 'violence', 'revenge', 'police officer', 'investigator', 'police detective', 'homicide detective', 'new york city', 'london, england', 'paris, france', 'los angeles, california',
+const BROAD = new Set(['friendship', 'love', 'family', 'death', 'money', 'police', 'small town', 'usa', 'united states', 'new york city', 'london, england', 'paris, france', 'los angeles, california',
   'alabama', 'alaska', 'arizona', 'arkansas', 'california', 'colorado', 'connecticut', 'delaware', 'florida', 'georgia', 'hawaii', 'idaho', 'illinois', 'indiana',
   'iowa', 'kansas', 'kentucky', 'louisiana', 'maine', 'maryland', 'massachusetts', 'michigan', 'minnesota', 'mississippi', 'missouri', 'montana', 'nebraska',
   'nevada', 'new hampshire', 'new jersey', 'new mexico', 'new york', 'north carolina', 'north dakota', 'ohio', 'oklahoma', 'oregon', 'pennsylvania',
   'rhode island', 'south carolina', 'south dakota', 'tennessee', 'texas', 'utah', 'vermont', 'virginia', 'washington', 'west virginia', 'wisconsin', 'wyoming']);
-export const isBroad = (k) => BROAD.has(k.name.toLowerCase());
-export const moodFactor = (k) => (isMood(k) ? 0.15 : isBroad(k) ? 0.35 : 1);
+export // Cop-show staples: they matter, but half of all crime titles have them.
+const PROCEDURAL = new Set(['detective', 'investigation', 'criminal', 'crime', 'murder', 'killer', 'violence', 'revenge', 'police officer', 'investigator', 'police detective', 'homicide detective']);
+const isBroad = (k) => BROAD.has(k.name.toLowerCase());
+// Not specific enough to make two titles alike on its own.
+export const isCommon = (k) => isBroad(k) || PROCEDURAL.has(k.name.toLowerCase());
+export const moodFactor = (k) => (isMood(k) ? 0.15 : isBroad(k) ? 0.35 : PROCEDURAL.has(k.name.toLowerCase()) ? 0.7 : 1);
 
 // How specific a tag is: "nurse" is on a few hundred well-known titles,
 // "murder" on thousands. Rare shared tags are what make two titles alike.
@@ -48,6 +51,8 @@ export async function moreLikeThis(tmdb, profile, type, id, { limit = 20 } = {})
   // Genre names: the source comes straight from TMDB ({id, name}), the
   // candidates are app items, which keep just the name.
   const genres = new Set((src.genres ?? []).map((g) => g.name));
+  // "Drama" is half of everything: a crime drama has to share crime (or mystery, ...).
+  const gate = new Set(genres.size > 1 ? [...genres].filter((g) => g !== 'Drama') : genres);
 
   // candidate key -> { type, id, hits: Set(tag id), rec }
   const cands = new Map();
@@ -137,7 +142,7 @@ export async function moreLikeThis(tmdb, profile, type, id, { limit = 20 } = {})
     // A documentary about the same case is, though, so the genre rule only
     // applies between two dramas (or two docs).
     if (isDoc(i) !== isDoc(src)) score *= 0.85;
-    else if (!sameGenre) score = 0;
+    else if (!(i.genres ?? []).some((g) => gate.has(g))) score = 0;
     if (srcReal && !isReal(i)) score *= 0.45;
     const story = shared.filter((k) => !isMood(k));
     const because = [...story.filter((k) => !isBroad(k)).sort((a, b) => w(b) - w(a)), ...story.filter(isBroad), ...shared.filter(isMood)].slice(0, 3).map((k) => k.name);
