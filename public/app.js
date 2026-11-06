@@ -13,12 +13,10 @@ const REGIONS = {
   SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', BR: 'Brazil', MX: 'Mexico',
   IN: 'India', JP: 'Japan', KR: 'South Korea',
 };
-// How you felt about something you've seen. Optional, on the detail screen.
-const FEELINGS = [
-  ['love', 'Loved it', 'heart'],
-  ['like', 'Liked it', 'up'],
-  ['dislike', 'Not for me', 'down'],
-];
+// Your rating as shown: "+8", "0", "-5".
+const fmtScore = (s) => (s > 0 ? `+${s}` : `${s}`);
+const scoreWord = (s) => (s >= 10 ? 'Perfection' : s >= 7 ? 'Loved it' : s >= 3 ? 'Liked it' : s >= 1 ? 'It was fine' : s === 0 ? 'Right in the middle'
+  : s > -3 ? 'Meh' : s > -7 ? "Didn't like it" : s > -10 ? 'Hated it' : 'Worst thing ever');
 
 const PATHS = {
   heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
@@ -229,8 +227,8 @@ function titleView(view) {
     it.type === 'tv' ? (it.seasons ? `${it.seasons} season${it.seasons > 1 ? 's' : ''}` : 'Series') : it.runtime ? `${Math.floor(it.runtime / 60)}h ${it.runtime % 60}m` : 'Film',
     it.genres.slice(0, 3).join(', '),
   ].filter(Boolean).join(' · ');
-  const felt = ['love', 'like', 'dislike'].includes(m.reaction);
-  const why = felt ? reasonsFor(it, m.reaction, m.reasons) : null;
+  const s = m.score;
+  const why = s > 0 ? reasonsFor(it, 'like', m.reasons) : s < 0 ? reasonsFor(it, 'dislike', m.reasons) : null;
   const rent = it.rentBuy ?? [];
 
   return `<div class="hero">
@@ -262,11 +260,15 @@ function titleView(view) {
     <section class="block">
       <h3>Your take</h3>
       <div class="quick big">${quickButtons(m, 'data-act')}</div>
-      ${m.reaction ? `<p class="why-label">How was it? <span>Optional</span></p>
-      <div class="takes">
-        ${FEELINGS.map(([k, label, ic]) => `<button data-act="${k}" class="take ${k}${m.reaction === k ? ' on' : ''}" aria-pressed="${m.reaction === k}">${icon(ic, m.reaction === k)}<span>${label}</span></button>`).join('')}
+      ${m.reaction ? `<p class="why-label">How was it? <span>${s == null ? 'Slide to rate' : m.scored ? 'Your rating' : 'From your old rating; slide to change'}</span></p>
+      <div class="rate">
+        <div class="rate-top"><output id="rate-val" class="rate-val ${s == null ? 'none' : s > 0 ? 'pos' : s < 0 ? 'neg' : 'zero'}">${s == null ? '–' : fmtScore(s)}</output>
+          <span id="rate-word" class="rate-word">${s == null ? 'Not rated yet' : scoreWord(s)}</span>
+          ${s != null ? '<button data-act="unrate" class="link-btn rate-clear">Clear</button>' : ''}</div>
+        <input id="rate" class="rate-range${s == null ? ' unset' : ''}" type="range" min="-10" max="10" step="1" value="${s ?? 0}" aria-label="Your rating from -10 to 10">
+        <div class="rate-ends"><span>−10 Worst ever</span><span>0</span><span>+10 Perfection</span></div>
       </div>` : ''}
-      ${why ? `<p class="why-label">${m.reaction === 'dislike' ? "What didn't work?" : 'What stood out?'} <span>Tap any that fit</span></p>
+      ${why ? `<p class="why-label">${s < 0 ? "What didn't work?" : 'What stood out?'} <span>Tap any that fit</span></p>
       <div class="why">
         ${why.map((r) => `<button data-reason="${esc(r)}" class="${m.reasons.includes(r) ? 'on' : ''}">${esc(r)}</button>`).join('')}
         <input id="note" data-note placeholder="Anything else? (optional)" value="${esc(m.note)}" maxlength="300">
@@ -274,7 +276,7 @@ function titleView(view) {
     </section>
 
     ${it.overview ? `<p class="overview">${esc(it.overview)}</p>` : ''}
-    ${it.because?.length ? `<p class="because">Because you liked ${it.because.map(esc).join(', ')}</p>` : ''}
+    ${it.because?.title ? `<p class="because">Suggested because you gave ${esc(it.because.title)} ${fmtScore(it.because.score)}</p>` : ''}
 
     <section class="block">
       <h3>Cast</h3>
@@ -324,9 +326,10 @@ function personView(view) {
 }
 
 // --- marking ------------------------------------------------------------------------
-async function saveRating(it, reaction, reasons = [], note = '') {
-  return (await api.mark({ list: 'ratings', type: it.type, tmdbId: it.tmdbId, reaction, reasons, note })).mine;
+async function saveRating(it, reaction, reasons = [], note = '', score = undefined) {
+  return (await api.mark({ list: 'ratings', type: it.type, tmdbId: it.tmdbId, reaction, reasons, note, score })).mine;
 }
+const keptScore = (m) => (m.scored ? m.score : undefined);
 
 // One handler for every mark, from a poster or the detail screen. Tapping an
 // active mark again undoes it.
@@ -355,16 +358,17 @@ async function act(key, what, extra = {}) {
       api.unmark({ ...ref, list: 'passed' });
       mine = { ...m, passed: false };
     } else mine = (await api.mark({ ...ref, list: 'passed' })).mine;
-  } else if (['love', 'like', 'dislike'].includes(what)) {
-    // Tapping the active feeling again goes back to plain "seen".
-    // Reasons carry over between love and like; they still apply.
-    const same = ['love', 'like'].includes(m.reaction) && ['love', 'like'].includes(what);
-    mine = m.reaction === what ? await saveRating(it, 'seen') : await saveRating(it, what, same ? m.reasons : [], same ? m.note : '');
+  } else if (what === 'score') {
+    // Reasons carry over while the rating stays on the same side of 0.
+    const same = Math.sign(m.score ?? 0) === Math.sign(extra.score) && extra.score !== 0;
+    mine = await saveRating(it, 'seen', same ? m.reasons : [], same ? m.note : '', extra.score);
+  } else if (what === 'unrate') {
+    mine = await saveRating(it, 'seen');
   } else if (what === 'reason') {
     const reasons = m.reasons.includes(extra.reason) ? m.reasons.filter((x) => x !== extra.reason) : [...m.reasons, extra.reason];
-    mine = await saveRating(it, m.reaction, reasons, extra.note ?? m.note);
+    mine = await saveRating(it, m.reaction, reasons, extra.note ?? m.note, keptScore(m));
   } else if (what === 'note') {
-    mine = await saveRating(it, m.reaction, m.reasons, extra.note);
+    mine = await saveRating(it, m.reaction, m.reasons, extra.note, keptScore(m));
   } else return;
   const next = { ...it, mine };
   items.set(key, next);
@@ -413,7 +417,7 @@ async function restore(key, prev) {
   const ref = { type: it.type, tmdbId: it.tmdbId, imdbId: it.imdbId };
   for (const list of ['ratings', 'watchlist', 'maybe', 'passed']) api.unmark({ ...ref, list });
   let mine = { reaction: null, reasons: [], note: '', want: false, maybe: false, passed: false };
-  if (prev.reaction) mine = await saveRating(it, prev.reaction, prev.reasons, prev.note);
+  if (prev.reaction) mine = await saveRating(it, prev.reaction, prev.reasons, prev.note, keptScore(prev));
   if (prev.want) mine = (await api.mark({ ...ref, list: 'watchlist' })).mine;
   if (prev.maybe) mine = (await api.mark({ ...ref, list: 'maybe' })).mine;
   if (prev.passed) mine = (await api.mark({ ...ref, list: 'passed' })).mine;
@@ -442,6 +446,17 @@ document.addEventListener('click', async (e) => {
 });
 document.addEventListener('change', (e) => {
   if (e.target.matches('#sheet-body [data-note]')) act(stack.at(-1).key, 'note', { note: e.target.value }).catch((err) => toast(err.message));
+  // The rating saves when you let go of the slider.
+  if (e.target.id === 'rate') act(stack.at(-1).key, 'score', { score: Number(e.target.value) }).catch((err) => toast(err.message));
+});
+// While sliding: show the number and what it means.
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'rate') return;
+  const v = Number(e.target.value);
+  e.target.classList.remove('unset');
+  $('#rate-val').textContent = fmtScore(v);
+  $('#rate-val').className = `rate-val ${v > 0 ? 'pos' : v < 0 ? 'neg' : 'zero'}`;
+  $('#rate-word').textContent = scoreWord(v);
 });
 $('#sheet-close').addEventListener('click', () => closeSheet());
 $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') closeSheet(true); });
@@ -618,7 +633,8 @@ let subsByCat = {};
 
 function loadCategories() {
   ({ categories, subs: subsByCat } = api.categories());
-  $('#cats').innerHTML = kindPicker() + categories.map((c) => `<button data-cat="${c.key}">${esc(c.name)}</button>`).join('');
+  $('#cats').innerHTML = kindPicker() + '<button data-cat="foryou" class="foryou-chip">For you</button>'
+    + categories.map((c) => `<button data-cat="${c.key}">${esc(c.name)}</button>`).join('');
 }
 
 function renderChips() {
@@ -660,15 +676,22 @@ async function loadBrowse(append = false) {
   $('#more').hidden = true;
   show('#browse-msg', 'Loading…');
   try {
-    const r = await api.browse({
-      category: browseState.category, sub: browseState.sub, page: browseState.page,
-    });
+    // "For you" is built from your ratings; everything else is a category.
+    const r = browseState.category === 'foryou'
+      ? { ...(await api.forYou()), totalPages: 1 }
+      : await api.browse({ category: browseState.category, sub: browseState.sub, page: browseState.page });
     if (req !== browseReq) return;
+    if (r.reason === 'no-likes') {
+      show('#browse-msg', "Rate a few things you've seen, above 0 for what you liked and below 0 for what you didn't, and suggestions built from your ratings show up here.");
+      return;
+    }
+    if (browseState.category === 'foryou') r.items = r.items.map((i) => ({ ...i, role: `Like ${i.because.title} (${fmtScore(i.because.score)})` }));
     browseState.totalPages = r.totalPages;
     renderWall('#browse-grid', r.items, append);
     const empty = activeFilters(status.view)
       ? 'Nothing here matches your sort & filter. Loosen them, or tap Clear.'
-      : status.kind !== 'all' ? `Nothing here for ${KIND_LABEL[status.kind].toLowerCase()}. Try All.` : 'Nothing here yet. Try another category.';
+      : status.kind !== 'all' ? `Nothing here for ${KIND_LABEL[status.kind].toLowerCase()}. Try All.`
+      : browseState.category === 'foryou' ? 'No strong matches yet. Rate a few more things you liked and this fills in.' : 'Nothing here yet. Try another category.';
     show('#browse-msg', $('#browse-grid').children.length ? legend() : empty);
     $('#more').hidden = browseState.page >= browseState.totalPages;
   } catch (e) {
@@ -771,8 +794,9 @@ async function loadList() {
   if (!$('#list-grid').children.length) show('#list-msg', 'Loading…');
   const req = ++listReq;
   try {
-    const { items: list } = await api.list(listShow);
+    let { items: list } = await api.list(listShow);
     if (req !== listReq) return;
+    if (listShow === 'seen') list = list.map((i) => ({ ...i, role: i.mine?.score == null ? 'Not rated yet' : `You: ${fmtScore(i.mine.score)} · ${scoreWord(i.mine.score)}` }));
     renderWall('#list-grid', list);
     if (!list.length) return show('#list-msg', LIST_EMPTY[listShow]);
     const streaming = list.filter((i) => i.services.length).length;

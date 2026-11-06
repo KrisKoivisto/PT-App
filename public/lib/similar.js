@@ -4,7 +4,7 @@ import { detail, matchesKind } from './browse.js';
 import { cleanView, applyView } from './filters.js';
 
 // Tags that describe the production, not the story.
-const GENERIC = /^(\d{4}s|based on (novel or book|comic|short story|play or musical|tv series|video game)|woman director|duringcreditsstinger|aftercreditsstinger|sequel|remake|miniseries|anime|live action remake|female protagonist|male protagonist|lgbt|lgbtq)$/i;
+export const GENERIC = /^(\d{4}s|based on (novel or book|comic|short story|play or musical|tv series|video game)|woman director|duringcreditsstinger|aftercreditsstinger|sequel|remake|miniseries|anime|live action remake|female protagonist|male protagonist|lgbt|lgbtq)$/i;
 
 // TMDB's mood tags ("riveting", "cynical"). They say how a title feels, not
 // what it's about, so they count for a little, never a match on their own.
@@ -14,22 +14,24 @@ const MOODS = new Set(('absurd admiring adoring aggressive ambivalent amused ang
   + 'hopeful horrified humorous informative inspirational intense introspective joyful joyous malicious melancholy mean spirited mocking '
   + 'nostalgic optimistic philosophical playful provocative psychotic reflective regretful relaxed respectful riveting romantic sarcastic '
   + 'scared sentimental serious sincere somber suspenseful sympathetic tense thoughtful thought provoking tragic urgent vibrant whimsical witty '
-  + 'investigative biographical candid powerful harsh hostile wary vindictive shocking disturbing gripping dark').match(/[a-z]+(?: (?:spirited|provoking))?/g));
-const isMood = (k) => MOODS.has(k.name.toLowerCase());
+  + 'investigative biographical candid powerful harsh hostile wary vindictive shocking disturbing gripping dark '
+  + 'dreary mysterious complex psychological thriller cerebral clever eerie ominous gritty bleak chilling heartbreaking').match(/[a-z]+(?: (?:spirited|provoking))?/g));
+export const isMood = (k) => MOODS.has(k.name.toLowerCase());
 
 // Settings and broad themes ("new jersey", "friendship") are true of the
 // title but rarely why you'd want another one like it.
-const BROAD = new Set(['friendship', 'love', 'family', 'death', 'money', 'police', 'small town', 'new york city', 'london, england', 'paris, france', 'los angeles, california',
+const BROAD = new Set(['friendship', 'love', 'family', 'death', 'money', 'police', 'small town',
+  'usa', 'united states', 'detective', 'investigation', 'criminal', 'crime', 'murder', 'killer', 'violence', 'revenge', 'police officer', 'investigator', 'police detective', 'homicide detective', 'new york city', 'london, england', 'paris, france', 'los angeles, california',
   'alabama', 'alaska', 'arizona', 'arkansas', 'california', 'colorado', 'connecticut', 'delaware', 'florida', 'georgia', 'hawaii', 'idaho', 'illinois', 'indiana',
   'iowa', 'kansas', 'kentucky', 'louisiana', 'maine', 'maryland', 'massachusetts', 'michigan', 'minnesota', 'mississippi', 'missouri', 'montana', 'nebraska',
   'nevada', 'new hampshire', 'new jersey', 'new mexico', 'new york', 'north carolina', 'north dakota', 'ohio', 'oklahoma', 'oregon', 'pennsylvania',
   'rhode island', 'south carolina', 'south dakota', 'tennessee', 'texas', 'utah', 'vermont', 'virginia', 'washington', 'west virginia', 'wisconsin', 'wyoming']);
-const isBroad = (k) => BROAD.has(k.name.toLowerCase());
-const moodFactor = (k) => (isMood(k) ? 0.15 : isBroad(k) ? 0.35 : 1);
+export const isBroad = (k) => BROAD.has(k.name.toLowerCase());
+export const moodFactor = (k) => (isMood(k) ? 0.15 : isBroad(k) ? 0.35 : 1);
 
 // How specific a tag is: "nurse" is on a few hundred well-known titles,
 // "murder" on thousands. Rare shared tags are what make two titles alike.
-const idf = (total) => Math.log(1 + 2000 / (total + 5));
+export const idf = (total) => Math.log(1 + 2000 / (total + 5));
 
 const MIN_VOTES = { movie: 50, tv: 15 };
 const other = (t) => (t === 'movie' ? 'tv' : 'movie');

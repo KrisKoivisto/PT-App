@@ -24,11 +24,11 @@ export const REMOTE_OF = { watchlist: 'want', maybe: 'maybe', ratings: 'seen', p
 const fail = (message, code) => Object.assign(new Error(message), { code });
 
 // How the "Seen" comment stores how it was: short keys keep it small.
-export const encodeSeen = (i) => JSON.stringify({ r: i.reaction ?? 'seen', w: i.reasons?.length ? i.reasons : undefined, n: i.note || undefined });
+export const encodeSeen = (i) => JSON.stringify({ r: i.reaction ?? 'seen', s: Number.isInteger(i.score) ? i.score : undefined, w: i.reasons?.length ? i.reasons : undefined, n: i.note || undefined });
 export function decodeSeen(comment) {
   try {
     const c = JSON.parse(comment);
-    return { reaction: c.r ?? 'seen', reasons: Array.isArray(c.w) ? c.w : [], note: typeof c.n === 'string' ? c.n : '' };
+    return { reaction: c.r ?? 'seen', ...(Number.isInteger(c.s) ? { score: c.s } : {}), reasons: Array.isArray(c.w) ? c.w : [], note: typeof c.n === 'string' ? c.n : '' };
   } catch {
     return { reaction: 'seen', reasons: [], note: '' };
   }

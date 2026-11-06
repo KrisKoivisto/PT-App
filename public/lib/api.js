@@ -2,9 +2,10 @@ import { createTmdb, pool } from './tmdb.js';
 import { shape, matchServices, brand } from './titles.js';
 import { browse, search, detail, CATEGORIES, subsOf, KINDS } from './browse.js';
 import { moreLikeThis } from './similar.js';
+import { forYou } from './foryou.js';
 import { cleanView, defaultView } from './filters.js';
 import { createSync, encodeSeen, REMOTE_OF } from './sync.js';
-import { REACTIONS, annotate } from './mine.js';
+import { REACTIONS, annotate, reactionOfScore } from './mine.js';
 
 export const defaultProfile = () => ({ region: 'US', kind: 'all', view: defaultView(), services: [], serviceBrands: [], ratings: [], watchlist: [], maybe: [], passed: [] });
 // watchlist = "Gotta watch", maybe = "Maybe" (the two bookmarks).
@@ -142,6 +143,12 @@ export function createApi({ store, base, fetchImpl, builtInKey = null, readToken
       return done({ ...r, items: annotate(profile, r.items) });
     },
 
+    // Suggestions tailored to your ratings (see foryou.js).
+    async forYou() {
+      const r = await forYou(needKey(), profile);
+      return done({ ...r, items: annotate(profile, r.items) });
+    },
+
     // An actor (or director) and the titles they're known for.
     async person(id) {
       const t = needKey();
@@ -178,7 +185,9 @@ export function createApi({ store, base, fetchImpl, builtInKey = null, readToken
       if (!LISTS.includes(list) || !['movie', 'tv'].includes(type) || !Number.isInteger(tmdbId)) {
         throw fail('Bad title.');
       }
-      if (list === 'ratings' && !REACTIONS[body.reaction]) throw fail('Pick how you felt about it.');
+      const score = Number.isInteger(body.score) && body.score >= -10 && body.score <= 10 ? body.score : null;
+      if (body.score != null && score == null) throw fail('Ratings go from -10 to 10.');
+      if (list === 'ratings' && !REACTIONS[body.reaction] && score == null) throw fail('Pick how you felt about it.');
       const d = await needKey().details(type, tmdbId, profile.region);
       if (!d) throw fail('TMDB has no such title.', 404);
       const item = {
@@ -191,7 +200,9 @@ export function createApi({ store, base, fetchImpl, builtInKey = null, readToken
         poster: d.poster_path ?? null,
       };
       if (list === 'ratings') {
-        item.reaction = body.reaction;
+        // A score (-10 to 10) decides the reaction; without one it's what was sent.
+        if (score != null) item.score = score;
+        item.reaction = score != null ? reactionOfScore(score) : body.reaction;
         item.reasons = (Array.isArray(body.reasons) ? body.reasons : [])
           .map((r) => clean(r, 40)).filter(Boolean).slice(0, 12);
         item.note = clean(body.note, 300);

@@ -7,6 +7,8 @@ import { demoFetch } from '../public/lib/demo.js';
 import { reasonsFor, kindOf } from '../public/lib/reasons.js';
 import { discoverParams, applyView, cleanView, describeView, activeFilters } from '../public/lib/filters.js';
 import { createServer } from '../server.js';
+import { encodeSeen, decodeSeen } from '../public/lib/sync.js';
+import { scoreOf } from '../public/lib/mine.js';
 
 // --- fake TMDB ------------------------------------------------------------------
 const NETFLIX = { provider_id: 8, provider_name: 'Netflix', logo_path: '/n.jpg' };
@@ -214,7 +216,7 @@ test('one-tap marks: seen, bookmark, pass, and how they replace each other', asy
 
     // How was it (optional) with reasons; replaces, never duplicates
     m = (await api.mark({ list: 'ratings', type: 'tv', tmdbId: 3, reaction: 'love', reasons: ['Gripping case', ' ', 5], note: ' wow ' })).mine;
-    assert.deepEqual(m, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', want: false, maybe: false, passed: false });
+    assert.deepEqual(m, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', score: 8, scored: false, want: false, maybe: false, passed: false });
     assert.equal(store.saved.profile.ratings.length, 1);
 
     // Pass undoes seen and bookmark; bookmarking undoes pass
@@ -588,7 +590,7 @@ test('sync: phone and computer share one list through the TMDB account', async (
     assert.deepEqual(computer.status().counts, { want: 1, maybe: 0, seen: 1, passed: 0 });
     const seen = (await computer.list('seen')).items[0];
     assert.equal(seen.title, 'Vault Job');
-    assert.deepEqual(seen.mine, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', want: false, maybe: false, passed: false });
+    assert.deepEqual(seen.mine, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', score: 8, scored: false, want: false, maybe: false, passed: false });
     assert.deepEqual([computer.status().services, computer.status().kind], [[8], 'limited']);
     assert.equal(acct.lists.size, 5, 'the computer reused the same lists');
 
@@ -648,4 +650,62 @@ test('static server serves the app and nothing outside it', async () => {
     res = await fetch(base + '/%2e%2e/package.json');
     assert.ok([403, 404].includes(res.status));
   } finally { server.close(); }
+});
+
+test('ratings go from -10 to 10, and old loved/liked/not for me carry over', async () => {
+  const api = createApi({ store: memStore('sample'), fetchImpl: demoFetch });
+  let m = (await api.mark({ list: 'ratings', type: 'movie', tmdbId: 101, score: 9 })).mine;
+  assert.equal(m.score, 9);
+  assert.equal(m.scored, true);
+  assert.equal(m.reaction, 'love');
+  m = (await api.mark({ list: 'ratings', type: 'movie', tmdbId: 101, score: -3, reasons: ['Too slow'] })).mine;
+  assert.equal(m.reaction, 'dislike');
+  assert.deepEqual(m.reasons, ['Too slow']);
+  m = (await api.mark({ list: 'ratings', type: 'movie', tmdbId: 101, score: 0 })).mine;
+  assert.equal(m.score, 0);
+  assert.equal(m.reaction, 'seen');
+  for (const bad of [11, -11, 3.5, '7']) {
+    await assert.rejects(api.mark({ list: 'ratings', type: 'movie', tmdbId: 101, score: bad }), /-10 to 10/);
+  }
+  // Clearing the rating keeps it as seen.
+  m = (await api.mark({ list: 'ratings', type: 'movie', tmdbId: 101, reaction: 'seen' })).mine;
+  assert.equal(m.score, null);
+  assert.equal(m.reaction, 'seen');
+
+  // Ratings from before the scale count as roughly +8, +5 and -5.
+  assert.equal(scoreOf({ reaction: 'love' }), 8);
+  assert.equal(scoreOf({ reaction: 'like' }), 5);
+  assert.equal(scoreOf({ reaction: 'dislike' }), -5);
+  assert.equal(scoreOf({ reaction: 'seen' }), null);
+  assert.equal(scoreOf({ reaction: 'love', score: 10 }), 10);
+
+  // The score rides along in the synced Seen list.
+  assert.equal(decodeSeen(encodeSeen({ reaction: 'dislike', score: -7, reasons: ['x'] })).score, -7);
+  assert.equal(decodeSeen(encodeSeen({ reaction: 'like' })).score, undefined);
+});
+
+test('for you: built from your ratings, high pulls in, low pushes away', async () => {
+  const api = createApi({ store: memStore('sample'), fetchImpl: demoFetch });
+  assert.equal((await api.forYou()).reason, 'no-likes');
+  await api.mark({ list: 'ratings', type: 'movie', tmdbId: 114, score: -6 });
+  assert.equal((await api.forYou()).reason, 'no-likes', 'only dislikes is not enough to go on');
+
+  await api.mark({ list: 'ratings', type: 'movie', tmdbId: 101, score: 9 }); // bank heist doc
+  let r = await api.forYou();
+  assert.equal(r.items[0].title, 'Heist Week');
+  assert.deepEqual(r.items[0].because, { title: 'The Vault Under Fifth Street', score: 9 });
+  assert.ok(!r.items.some((i) => [101, 114].includes(i.tmdbId) && i.type === 'movie'), 'nothing you already rated');
+  assert.ok(!r.items.some((i) => ['Laugh Track', 'The Last Laugh Tour', 'Small Town Secrets'].includes(i.title)), 'nothing unrelated');
+  const alone = r.items[0].match;
+
+  // Hating a robbery movie pulls Heist Week (also a robbery) down.
+  await api.mark({ list: 'ratings', type: 'movie', tmdbId: 109, score: -10 });
+  r = await api.forYou();
+  assert.ok((r.items.find((i) => i.title === 'Heist Week')?.match ?? 0) < alone);
+
+  // Marked titles drop off; the toggle applies.
+  await api.mark({ list: 'maybe', type: 'tv', tmdbId: 112 });
+  assert.ok(!(await api.forYou()).items.some((i) => i.title === 'Heist Week'));
+  api.settings({ kind: 'movie' });
+  assert.ok((await api.forYou()).items.every((i) => i.type === 'movie'));
 });
