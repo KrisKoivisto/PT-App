@@ -11,6 +11,7 @@ export function shape(type, d, region) {
     title: d.title ?? d.name,
     year: Number((d.release_date ?? d.first_air_date ?? '').slice(0, 4)) || null,
     releaseDate: d.release_date || d.first_air_date || null,
+    lastAirDate: d.last_air_date || null, // shows: the latest episode so far
     popularity: d.popularity ?? 0,
     overview: d.overview,
     poster: d.poster_path,

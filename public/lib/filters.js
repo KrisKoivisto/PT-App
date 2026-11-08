@@ -8,17 +8,26 @@ export const RELEASED = { any: 'Any time', year: 'Past year', five: 'Last 5 year
 
 // where: 'any' (no streaming filter), 'mine' (your services), or 'pick'
 // (the services in `picks`, each { id, name, brand }).
-export const defaultView = () => ({ sort: 'popular', where: 'any', picks: [], rating: 0, released: 'any' });
+// The default: top rated, from the past year, on the big streaming services.
+export const DEFAULT_PICKS = [
+  { id: 8, name: 'Netflix' }, { id: 9, name: 'Amazon Prime Video' }, { id: 1899, name: 'HBO Max' }, { id: 15, name: 'Hulu' },
+  { id: 337, name: 'Disney Plus' }, { id: 350, name: 'Apple TV' }, { id: 386, name: 'Peacock Premium' }, { id: 2303, name: 'Paramount Plus Premium' },
+];
+const cleanPicks = (picks) => picks.filter((p) => Number.isInteger(p?.id)).slice(0, 20)
+  .map((p) => ({ id: p.id, name: String(p.name ?? p.brand ?? '').slice(0, 40), brand: brand(String(p.name ?? p.brand ?? '')) }));
+export const defaultView = () => ({ sort: 'top', where: 'pick', picks: cleanPicks(DEFAULT_PICKS), rating: 0, released: 'year' });
+// No sorting or filtering at all (what the app used to start with).
+export const openView = () => ({ sort: 'popular', where: 'any', picks: [], rating: 0, released: 'any' });
 
 export function cleanView(v = {}) {
   const d = defaultView();
+  let where = ['any', 'mine', 'pick'].includes(v.where) ? v.where : d.where;
+  const picks = Array.isArray(v.picks) ? cleanPicks(v.picks) : where === 'pick' ? d.picks : [];
+  if (where === 'pick' && !picks.length) where = 'any'; // "these services", with none picked, is anywhere
   return {
     sort: SORTS[v.sort] ? v.sort : d.sort,
-    where: ['any', 'mine', 'pick'].includes(v.where) ? v.where : d.where,
-    picks: Array.isArray(v.picks)
-      ? v.picks.filter((p) => Number.isInteger(p?.id)).slice(0, 20)
-        .map((p) => ({ id: p.id, name: String(p.name ?? p.brand ?? '').slice(0, 40), brand: brand(String(p.name ?? p.brand ?? '')) }))
-      : [],
+    where,
+    picks,
     rating: RATINGS.includes(v.rating) ? v.rating : d.rating,
     released: RELEASED[v.released] ? v.released : d.released,
   };
@@ -44,13 +53,15 @@ export function wantedServices(view, profile) {
 }
 
 // Vote floors keep a 10/10 from three votes off the top of "Top rated".
-const MIN_VOTES = { movie: { top: 200, rated: 50, oldest: 30, newest: 5 }, tv: { top: 50, rated: 20, oldest: 15, newest: 5 } };
+const MIN_VOTES = { movie: { top: 200, recent: 40, rated: 50, oldest: 30, newest: 5 }, tv: { top: 50, recent: 15, rated: 20, oldest: 15, newest: 5 } };
 
 export function discoverParams(view, type, profile, now = new Date()) {
   const date = type === 'movie' ? 'primary_release_date' : 'first_air_date';
   const floor = MIN_VOTES[type];
   const p = {};
-  if (view.sort === 'top') Object.assign(p, { sort_by: 'vote_average.desc', 'vote_count.gte': floor.top });
+  // Stuff from the past year hasn't had time to pile up votes; a lower bar
+  // still keeps out a 10/10 from three people.
+  if (view.sort === 'top') Object.assign(p, { sort_by: 'vote_average.desc', 'vote_count.gte': view.released === 'year' ? floor.recent : floor.top });
   else if (view.sort === 'newest') Object.assign(p, { sort_by: `${date}.desc`, 'vote_count.gte': floor.newest });
   else if (view.sort === 'oldest') Object.assign(p, { sort_by: `${date}.asc`, 'vote_count.gte': floor.oldest });
   else p.sort_by = 'popularity.desc';
@@ -60,8 +71,16 @@ export function discoverParams(view, type, profile, now = new Date()) {
     p['vote_count.gte'] = Math.max(p['vote_count.gte'] ?? 0, floor.rated);
   }
   const range = dateRange(view.released, now);
-  if (range.gte) p[`${date}.gte`] = range.gte;
-  if (range.lte) p[`${date}.lte`] = range.lte;
+  if (type === 'tv' && range.gte) {
+    // A show counts as recent if it aired an episode in the range, so
+    // Dateline (since 1992) is in "Past year" when it has new episodes.
+    p['air_date.gte'] = range.gte;
+    p['air_date.lte'] = range.lte;
+    p[`${date}.lte`] = range.lte;
+  } else {
+    if (range.gte) p[`${date}.gte`] = range.gte;
+    if (range.lte) p[`${date}.lte`] = range.lte;
+  }
 
   const svc = wantedServices(view, profile);
   if (svc?.ids.length) {
@@ -95,7 +114,8 @@ export function applyView(items, view, profile, { sort = true, now = new Date() 
     }
     if (view.rating && !((i.voteAverage ?? 0) >= view.rating && (i.voteCount ?? 0) >= 20)) return false;
     if (view.released !== 'any') {
-      const d = i.releaseDate ?? '';
+      // Shows go by their latest episode for the recent ranges, as above.
+      const d = (i.type === 'tv' && range.gte ? i.lastAirDate ?? i.releaseDate : i.releaseDate) ?? '';
       if (!d || (range.gte && d < range.gte) || (range.lte && d > range.lte)) return false;
     }
     return true;

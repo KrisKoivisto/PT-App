@@ -5,7 +5,7 @@ import { createApi, browserStore } from '../public/lib/api.js';
 import { matchCategories } from '../public/lib/browse.js';
 import { demoFetch } from '../public/lib/demo.js';
 import { reasonsFor, kindOf } from '../public/lib/reasons.js';
-import { discoverParams, applyView, cleanView, describeView, activeFilters } from '../public/lib/filters.js';
+import { discoverParams, applyView, cleanView, describeView, activeFilters, openView, defaultView } from '../public/lib/filters.js';
 import { createServer } from '../server.js';
 import { encodeSeen, decodeSeen } from '../public/lib/sync.js';
 import { scoreOf } from '../public/lib/mine.js';
@@ -62,7 +62,8 @@ const DB = {
 
 const calls = [];
 const memStore = (key) => {
-  const saved = { key, profile: null };
+  // Tests start with no sort or filter on; the app's own default is tested on its own.
+  const saved = { key, profile: { newDefaults: true, view: openView() } };
   return {
     saved, cache: { data: {} },
     loadProfile: () => saved.profile, saveProfile: (p) => { saved.profile = structuredClone(p); },
@@ -420,21 +421,23 @@ test('sort and filter become the right TMDB queries for categories', async () =>
   try {
     const now = new Date('2026-10-31T12:00:00Z');
     const profile = { region: 'US', services: [8], serviceBrands: ['netflix'] };
-    let p = discoverParams(cleanView({ sort: 'top', rating: 7, released: 'five' }), 'movie', profile, now);
+    let p = discoverParams(cleanView({ ...openView(), sort: 'top', rating: 7, released: 'five' }), 'movie', profile, now);
     assert.deepEqual(p, {
       sort_by: 'vote_average.desc', 'vote_count.gte': 200, 'vote_average.gte': 7,
       'primary_release_date.gte': '2021-10-31', 'primary_release_date.lte': '2026-10-31',
       watch_region: 'US', with_watch_monetization_types: 'flatrate|free|ads|rent|buy',
     });
-    p = discoverParams(cleanView({ sort: 'newest', where: 'pick', picks: [{ id: 8, name: 'Netflix' }, { id: 1899, name: 'HBO Max' }] }), 'tv', profile, now);
+    p = discoverParams(cleanView({ ...openView(), sort: 'newest', where: 'pick', picks: [{ id: 8, name: 'Netflix' }, { id: 1899, name: 'HBO Max' }] }), 'tv', profile, now);
     assert.equal(p.sort_by, 'first_air_date.desc');
     assert.equal(p['first_air_date.lte'], '2026-10-31', 'nothing that is not out yet');
     assert.equal(p.with_watch_providers, '8|1899');
-    p = discoverParams(cleanView({ sort: 'oldest', released: 'classic' }), 'tv', profile, now);
+    p = discoverParams(cleanView({ ...openView(), released: 'year' }), 'tv', profile, now);
+    assert.deepEqual([p['air_date.gte'], p['air_date.lte'], p['first_air_date.gte']], ['2025-10-31', '2026-10-31', undefined], 'shows: any episode in the past year');
+    p = discoverParams(cleanView({ ...openView(), sort: 'oldest', released: 'classic' }), 'tv', profile, now);
     assert.deepEqual([p.sort_by, p['first_air_date.lte'], p['first_air_date.gte']], ['first_air_date.asc', '1999-12-31', undefined]);
 
     // Movies and shows from separate calls merge in the chosen order
-    api.settings({ view: { sort: 'top' } });
+    api.settings({ view: { ...openView(), sort: 'top' } });
     calls.length = 0;
     const r = await api.browse({ category: 'true-crime' });
     assert.ok(calls.filter((u) => u.pathname.startsWith('/discover/')).every((u) => u.searchParams.get('sort_by') === 'vote_average.desc'));
@@ -454,7 +457,7 @@ test('filters apply to search results; sorting only when you pick one', () => {
     item('Rated by three', { stream: [{ id: 8, name: 'Netflix' }], voteAverage: 9.9, voteCount: 3, popularity: 9 }),
   ];
   const profile = { services: [8], serviceBrands: ['netflix'] };
-  const titles = (v, opts) => applyView(items, cleanView(v), profile, { now, ...opts }).map((i) => i.title);
+  const titles = (v, opts) => applyView(items, cleanView({ ...openView(), ...v }), profile, { now, ...opts }).map((i) => i.title);
 
   assert.deepEqual(titles({ where: 'mine' }, { sort: false }), ['Old Netflix', 'Rated by three'], 'ad tier counts as Netflix');
   assert.deepEqual(titles({ rating: 7 }), ['Old Netflix'], 'a 9.9 from three votes is not a 7+');
@@ -465,10 +468,19 @@ test('filters apply to search results; sorting only when you pick one', () => {
   assert.deepEqual(titles({ sort: 'top' }), ['Rated by three', 'Old Netflix', 'New Hulu']);
   assert.deepEqual(titles({ sort: 'popular' }), ['New Hulu', 'Rated by three', 'Old Netflix']);
 
-  const v = cleanView({ sort: 'top', where: 'pick', picks: [{ id: 8, name: 'Netflix' }], rating: 7, released: 'five' });
+  const v = cleanView({ ...openView(), sort: 'top', where: 'pick', picks: [{ id: 8, name: 'Netflix' }], rating: 7, released: 'five' });
   assert.equal(describeView(v, (p) => p.brand === 'netflix' ? 'Netflix' : p.brand), 'Top rated · Netflix · 7+ rating · Last 5 years');
   assert.equal(activeFilters(v), 4);
-  assert.equal(activeFilters(cleanView({})), 0);
+  assert.equal(activeFilters(cleanView(openView())), 0);
+
+  // Shows count as recent by their latest episode (Dateline since 1992 is in the past year).
+  const shows = [
+    item('Dateline', { type: 'tv', releaseDate: '1992-03-31', lastAirDate: '2026-10-30' }),
+    item('Ended show', { type: 'tv', releaseDate: '2018-01-01', lastAirDate: '2019-01-01' }),
+  ];
+  const showTitles = (released) => applyView(shows, cleanView({ ...openView(), released }), profile, { now }).map((i) => i.title);
+  assert.deepEqual(showTitles('year'), ['Dateline']);
+  assert.deepEqual(showTitles('classic'), ['Dateline'], 'before 2000 still goes by when it started');
 });
 
 test('every category but stand-up has subcategories, queried as genre AND topic', async () => {
@@ -769,4 +781,29 @@ test('new seasons of shows you have seen', async () => {
 
   assert.throws(() => api.season({ type: 'tv', tmdbId: 112, through: 1 }), /seen first/);
   await assert.rejects(api.mark({ list: 'ratings', type: 'tv', tmdbId: 112, reaction: 'seen', through: -1 }), /Bad season/);
+});
+
+test('the default: top rated, past year, on the big streaming services', async () => {
+  const v = cleanView({});
+  assert.deepEqual([v.sort, v.where, v.rating, v.released], ['top', 'pick', 0, 'year']);
+  assert.deepEqual(v.picks.map((p) => p.name), ['Netflix', 'Amazon Prime Video', 'HBO Max', 'Hulu', 'Disney Plus', 'Apple TV', 'Peacock Premium', 'Paramount Plus Premium']);
+  assert.deepEqual(defaultView(), v);
+  // A list saved before, with nothing filtered, takes the new default once.
+  let saved = { key: 'sample', profile: { view: openView(), ratings: [] } };
+  const mk = () => createApi({ store: { cache: { data: {} }, loadProfile: () => saved.profile, saveProfile: (p) => { saved.profile = structuredClone(p); }, loadKey: () => saved.key, saveKey() {} }, fetchImpl: demoFetch });
+  let api = mk();
+  assert.equal(api.status().view.sort, 'top');
+  // ...but only once: clear it after that and it stays cleared.
+  api.settings({ view: openView() });
+  api = mk();
+  assert.equal(api.status().view.sort, 'popular');
+  // Someone who'd set their own filters keeps them.
+  saved = { key: 'sample', profile: { view: { ...openView(), sort: 'newest' } } };
+  assert.equal(mk().status().view.sort, 'newest');
+  // Searching a name finds it even when it's older than the date filter.
+  api = mk();
+  api.settings({ view: { ...defaultView(), released: 'classic' } });
+  assert.ok((await api.search('Vault')).items.some((i) => i.title === 'The Vault Under Fifth Street'));
+  // "These services" with none picked means anywhere.
+  assert.equal(cleanView({ where: 'pick', picks: [] }).where, 'any');
 });

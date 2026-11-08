@@ -3,8 +3,9 @@
 // to skip (`skipped`); a season that aired after that is "new".
 
 export const RECENT_DAYS = 183; // about six months
-// Talk and news shows start a "season" every year; nobody's catching up on those.
-export const ONGOING = ['Talk Show', 'News'];
+// Talk shows start a "season" every year; nobody's catching up on those.
+// (Not News: TMDB files Dateline and 20/20 under News.)
+export const ONGOING = ['Talk Show'];
 const DAY = 24 * 60 * 60 * 1000;
 const today = (now) => new Date(now).toISOString().slice(0, 10);
 

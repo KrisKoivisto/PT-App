@@ -321,11 +321,12 @@ async function topicTitles(tmdb, kws) {
 export async function search(tmdb, profile, q) {
   const suggestions = matchCategories(q);
   const { titles, people } = await tmdb.search(q);
-  // Search keeps TMDB's best-match order unless you picked a sort; the
-  // toggle and filters apply either way.
+  // Typing a name means you want that title: name matches keep TMDB's
+  // best-match order and skip the release date and rating filters (the
+  // toggle and services still apply). Topic matches get everything.
   const view = cleanView(profile.view);
   const all = await detail(tmdb, profile, titles.map((h) => ({ type: h.type, id: h.tmdbId })));
-  const items = applyView(all.filter((i) => matchesKind(i, profile.kind)), view, profile, { sort: view.sort !== 'popular' });
+  const items = applyView(all.filter((i) => matchesKind(i, profile.kind)), { ...view, released: 'any', rating: 0 }, profile, { sort: false });
 
   // Plot-ish searches ("nurse who killed patients") rarely match a title, so
   // also try them as topics. Skip when the query is clearly a title.

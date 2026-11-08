@@ -4,11 +4,11 @@ import { browse, search, detail, CATEGORIES, subsOf, KINDS, matchesKind } from '
 import { lastAired, newSeason, ONGOING } from './seasons.js';
 import { moreLikeThis } from './similar.js';
 import { forYou } from './foryou.js';
-import { cleanView, defaultView, applyView } from './filters.js';
+import { cleanView, defaultView, openView, applyView } from './filters.js';
 import { createSync, encodeSeen, REMOTE_OF } from './sync.js';
 import { REACTIONS, annotate, reactionOfScore, scoreOf } from './mine.js';
 
-export const defaultProfile = () => ({ region: 'US', kind: 'all', view: defaultView(), services: [], serviceBrands: [], ratings: [], watchlist: [], maybe: [], passed: [] });
+export const defaultProfile = () => ({ newDefaults: true, region: 'US', kind: 'all', view: defaultView(), services: [], serviceBrands: [], ratings: [], watchlist: [], maybe: [], passed: [] });
 // watchlist = "Gotta watch", maybe = "Maybe" (the two bookmarks).
 const LISTS = ['ratings', 'watchlist', 'maybe', 'passed'];
 // Marking a title on one list takes it off these.
@@ -28,7 +28,15 @@ const clean = (s, max) => (typeof s === 'string' ? s.trim().slice(0, max) : '');
 // wins over `builtInKey`. With `readToken`, the list syncs through the
 // user's TMDB account (see sync.js).
 export function createApi({ store, base, fetchImpl, builtInKey = null, readToken = null, syncBase }) {
-  const profile = { ...defaultProfile(), ...(store.loadProfile() ?? {}) };
+  const loaded = store.loadProfile();
+  const profile = { ...defaultProfile(), ...(loaded ?? {}) };
+  // Saved before the default changed and never touched: take the new default.
+  if (loaded && !loaded.newDefaults) {
+    const v = cleanView(profile.view);
+    const o = openView();
+    if (v.sort === o.sort && v.where === o.where && v.rating === o.rating && v.released === o.released) profile.view = defaultView();
+    profile.newDefaults = true;
+  }
   const cache = store.cache;
   const make = (k) => (k ? createTmdb({ key: k, base, cache, fetchImpl }) : null);
   let tmdb = make(store.loadKey() || builtInKey);

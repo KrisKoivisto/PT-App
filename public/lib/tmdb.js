@@ -113,7 +113,7 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
     // is kept; otherwise the cache would outgrow the phone's storage.
     details: (type, id, region = 'US') =>
       get(`/${type}/${id}`, { append_to_response: 'watch/providers,external_ids,keywords' }, (d) => d && {
-        id: d.id, title: d.title, name: d.name, release_date: d.release_date, first_air_date: d.first_air_date,
+        id: d.id, title: d.title, name: d.name, release_date: d.release_date, first_air_date: d.first_air_date, last_air_date: d.last_air_date,
         overview: d.overview, poster_path: d.poster_path, backdrop_path: d.backdrop_path, genres: d.genres,
         runtime: d.runtime, episode_run_time: d.episode_run_time, number_of_seasons: d.number_of_seasons,
         vote_average: d.vote_average, vote_count: d.vote_count, popularity: d.popularity, type: d.type,
@@ -123,7 +123,7 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
         'watch/providers': { results: { [region]: d['watch/providers']?.results?.[region] } },
         // TV: each season's number and premiere date, for "new season" checks.
         seasons: d.seasons ? d.seasons.map((s) => ({ n: s.season_number, date: s.air_date || null })) : undefined,
-      }, `#${region}#4`),
+      }, `#${region}#5`),
 
     async providerList(region) {
       const [m, t] = await Promise.all([
