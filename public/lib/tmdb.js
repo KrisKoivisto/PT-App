@@ -121,7 +121,9 @@ export function createTmdb({ key, base = 'https://api.themoviedb.org/3', cache, 
         // Movies send keywords.keywords, TV sends keywords.results.
         keywords: (d.keywords?.keywords ?? d.keywords?.results ?? []).map((k) => ({ id: k.id, name: k.name })),
         'watch/providers': { results: { [region]: d['watch/providers']?.results?.[region] } },
-      }, `#${region}#3`),
+        // TV: each season's number and premiere date, for "new season" checks.
+        seasons: d.seasons ? d.seasons.map((s) => ({ n: s.season_number, date: s.air_date || null })) : undefined,
+      }, `#${region}#4`),
 
     async providerList(region) {
       const [m, t] = await Promise.all([

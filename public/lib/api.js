@@ -1,11 +1,12 @@
 import { createTmdb, pool } from './tmdb.js';
-import { shape, matchServices, brand } from './titles.js';
-import { browse, search, detail, CATEGORIES, subsOf, KINDS } from './browse.js';
+import { shape, matchServices, brand, seenSet, isSeen } from './titles.js';
+import { browse, search, detail, CATEGORIES, subsOf, KINDS, matchesKind } from './browse.js';
+import { lastAired, newSeason, ONGOING } from './seasons.js';
 import { moreLikeThis } from './similar.js';
 import { forYou } from './foryou.js';
-import { cleanView, defaultView } from './filters.js';
+import { cleanView, defaultView, applyView } from './filters.js';
 import { createSync, encodeSeen, REMOTE_OF } from './sync.js';
-import { REACTIONS, annotate, reactionOfScore } from './mine.js';
+import { REACTIONS, annotate, reactionOfScore, scoreOf } from './mine.js';
 
 export const defaultProfile = () => ({ region: 'US', kind: 'all', view: defaultView(), services: [], serviceBrands: [], ratings: [], watchlist: [], maybe: [], passed: [] });
 // watchlist = "Gotta watch", maybe = "Maybe" (the two bookmarks).
@@ -188,6 +189,8 @@ export function createApi({ store, base, fetchImpl, builtInKey = null, readToken
       const score = Number.isInteger(body.score) && body.score >= -10 && body.score <= 10 ? body.score : null;
       if (body.score != null && score == null) throw fail('Ratings go from -10 to 10.');
       if (list === 'ratings' && !REACTIONS[body.reaction] && score == null) throw fail('Pick how you felt about it.');
+      const season = (x) => (x === undefined ? undefined : Number.isInteger(x) && x >= 0 && x < 1000 ? x : (() => { throw fail('Bad season.'); })());
+      const through = season(body.through);
       const d = await needKey().details(type, tmdbId, profile.region);
       if (!d) throw fail('TMDB has no such title.', 404);
       const item = {
@@ -208,12 +211,56 @@ export function createApi({ store, base, fetchImpl, builtInKey = null, readToken
         item.note = clean(body.note, 300);
       }
       const same = (i) => (i.tmdbId === tmdbId && i.type === type) || (item.imdbId && i.imdbId === item.imdbId);
+      if (list === 'ratings' && type === 'tv') {
+        // Which season you're caught up through. Re-rating keeps it; marking
+        // a show seen for the first time means all of it, unless you said
+        // otherwise (the app asks when the newest season is recent).
+        const old = profile.ratings.find(same);
+        const t = through ?? (old ? old.through : lastAired(d.seasons)?.n);
+        if (Number.isInteger(t)) item.through = t;
+        if (Number.isInteger(old?.skipped)) item.skipped = old.skipped;
+      }
       profile[list] = [...profile[list].filter((i) => !same(i)), item];
       const drop = DROPS[list];
       for (const l of drop) profile[l] = profile[l].filter((i) => !same(i));
       save();
       queueMark(list, item);
       return done(annotate(profile, [item])[0]);
+    },
+
+    // A show's seasons: caught up through `through`, or skip up to `skipped`
+    // (null clears either). Stays on Seen, and on any bookmark it's on.
+    season({ type, tmdbId, through, skipped }) {
+      const r = profile.ratings.find((i) => i.type === type && i.tmdbId === tmdbId);
+      if (!r) throw fail('Mark it seen first.');
+      for (const [k, v] of [['through', through], ['skipped', skipped]]) {
+        if (v === undefined) continue;
+        if (v === null) delete r[k];
+        else if (Number.isInteger(v) && v >= 0 && v < 1000) r[k] = v;
+        else throw fail('Bad season.');
+      }
+      save();
+      if (sync?.signedIn) sync.queue({ kind: 'add', list: REMOTE_OF.ratings, item: r, comment: encodeSeen(r) });
+      return { ok: true };
+    },
+
+    // New seasons of shows you've seen (and didn't rate below 0), newest
+    // first. Shows already bookmarked are left out: they're on your list.
+    async newSeasons() {
+      if (profile.kind === 'movie') return { items: [] };
+      const t = needKey();
+      const listed = seenSet([...profile.watchlist, ...profile.maybe, ...profile.passed]);
+      const shows = profile.ratings.filter((r) => r.type === 'tv' && r.tmdbId && !((scoreOf(r) ?? 0) < 0) && !isSeen(listed, r));
+      let items = (await pool(shows, 8, async (r) => {
+        const d = await t.details('tv', r.tmdbId, profile.region);
+        if (!d || ONGOING.includes(d.type) || !newSeason(r, d.seasons)) return null;
+        const item = shape('tv', d, profile.region);
+        return { ...item, services: matchServices(item, profile) };
+      })).filter(Boolean).filter((i) => matchesKind(i, profile.kind));
+      // Where it streams still applies; release date and rating don't (it's an old show's new season).
+      items = applyView(items, { ...cleanView(profile.view), rating: 0, released: 'any' }, profile, { sort: false });
+      const out = annotate(profile, items).sort((a, b) => (b.mine.newSeason.date > a.mine.newSeason.date ? 1 : -1));
+      return done({ items: out });
     },
 
     unmark({ list, type, tmdbId, imdbId }) {

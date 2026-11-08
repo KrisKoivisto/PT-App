@@ -9,6 +9,7 @@ import { discoverParams, applyView, cleanView, describeView, activeFilters } fro
 import { createServer } from '../server.js';
 import { encodeSeen, decodeSeen } from '../public/lib/sync.js';
 import { scoreOf } from '../public/lib/mine.js';
+import { lastAired, assumedThrough, newSeason, isRecent } from '../public/lib/seasons.js';
 
 // --- fake TMDB ------------------------------------------------------------------
 const NETFLIX = { provider_id: 8, provider_name: 'Netflix', logo_path: '/n.jpg' };
@@ -216,7 +217,7 @@ test('one-tap marks: seen, bookmark, pass, and how they replace each other', asy
 
     // How was it (optional) with reasons; replaces, never duplicates
     m = (await api.mark({ list: 'ratings', type: 'tv', tmdbId: 3, reaction: 'love', reasons: ['Gripping case', ' ', 5], note: ' wow ' })).mine;
-    assert.deepEqual(m, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', score: 8, scored: false, want: false, maybe: false, passed: false });
+    assert.deepEqual(m, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', score: 8, scored: false, through: null, skipped: null, newSeason: null, want: false, maybe: false, passed: false });
     assert.equal(store.saved.profile.ratings.length, 1);
 
     // Pass undoes seen and bookmark; bookmarking undoes pass
@@ -590,7 +591,7 @@ test('sync: phone and computer share one list through the TMDB account', async (
     assert.deepEqual(computer.status().counts, { want: 1, maybe: 0, seen: 1, passed: 0 });
     const seen = (await computer.list('seen')).items[0];
     assert.equal(seen.title, 'Vault Job');
-    assert.deepEqual(seen.mine, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', score: 8, scored: false, want: false, maybe: false, passed: false });
+    assert.deepEqual(seen.mine, { reaction: 'love', reasons: ['Gripping case'], note: 'wow', score: 8, scored: false, through: null, skipped: null, newSeason: null, want: false, maybe: false, passed: false });
     assert.deepEqual([computer.status().services, computer.status().kind], [[8], 'limited']);
     assert.equal(acct.lists.size, 5, 'the computer reused the same lists');
 
@@ -708,4 +709,64 @@ test('for you: built from your ratings, high pulls in, low pushes away', async (
   assert.ok(!(await api.forYou()).items.some((i) => i.title === 'Heist Week'));
   api.settings({ kind: 'movie' });
   assert.ok((await api.forYou()).items.every((i) => i.type === 'movie'));
+});
+
+test('seasons: the newest one out, and what counts as new', () => {
+  const now = Date.parse('2026-11-08T12:00:00Z');
+  const S = [{ n: 0, date: '2015-01-01' }, { n: 1, date: '2019-03-01' }, { n: 2, date: '2021-05-01' }, { n: 3, date: '2026-09-12' }, { n: 4, date: '2027-06-01' }, { n: 5, date: null }];
+  assert.deepEqual(lastAired(S, now), { n: 3, date: '2026-09-12' }, 'specials, future and undated seasons don\'t count');
+  assert.equal(isRecent('2026-09-12', now), true);
+  assert.equal(isRecent('2026-04-01', now), false);
+  // Marked before seasons were tracked: everything older than six months counts as seen.
+  assert.equal(assumedThrough(S, now), 2);
+  assert.equal(assumedThrough(S.slice(0, 3), now), 2);
+  assert.equal(assumedThrough([{ n: 1, date: '2026-10-01' }], now), 1, 'a brand new first season you marked seen is seen');
+  assert.deepEqual(newSeason({}, S, now), { from: 3, to: 3, date: '2026-09-12' });
+  assert.deepEqual(newSeason({ through: 1 }, S, now), { from: 2, to: 3, date: '2026-09-12' });
+  assert.equal(newSeason({ through: 3 }, S, now), null);
+  assert.equal(newSeason({ through: 2, skipped: 3 }, S, now), null);
+});
+
+test('new seasons of shows you have seen', async () => {
+  const api = createApi({ store: memStore('sample'), fetchImpl: demoFetch });
+  // Cold Trail: season 3 came out two months ago. Marked seen through season 2.
+  let m = (await api.mark({ list: 'ratings', type: 'tv', tmdbId: 107, reaction: 'seen', through: 2 })).mine;
+  assert.equal(m.through, 2);
+  // Ponzi Kings: nothing recent, so marking it seen means all of it.
+  m = (await api.mark({ list: 'ratings', type: 'tv', tmdbId: 104, reaction: 'seen' })).mine;
+  assert.equal(m.through, 2);
+  let r = await api.newSeasons();
+  assert.deepEqual(r.items.map((i) => i.title), ['Cold Trail']);
+  assert.deepEqual([r.items[0].mine.newSeason.from, r.items[0].mine.newSeason.to], [3, 3]);
+  assert.equal(r.items[0].lastSeason.n, 3);
+
+  // Rating it keeps the season; the rating sync carries it.
+  m = (await api.mark({ list: 'ratings', type: 'tv', tmdbId: 107, score: 6 })).mine;
+  assert.equal(m.through, 2);
+  assert.deepEqual(decodeSeen(encodeSeen({ reaction: 'like', through: 2, skipped: 3 })), { reaction: 'like', reasons: [], note: '', through: 2, skipped: 3 });
+
+  // Caught up: gone. Back to before tracking (no season saved): six-month rule says ask.
+  api.season({ type: 'tv', tmdbId: 107, through: 3 });
+  assert.equal((await api.newSeasons()).items.length, 0);
+  api.season({ type: 'tv', tmdbId: 107, through: null });
+  assert.equal((await api.newSeasons()).items.length, 1);
+  // Skip it: gone, still on Seen.
+  api.season({ type: 'tv', tmdbId: 107, skipped: 3 });
+  assert.equal((await api.newSeasons()).items.length, 0);
+  assert.equal(api.status().counts.seen, 2);
+  api.season({ type: 'tv', tmdbId: 107, skipped: null });
+
+  // Not for shows you rated below 0, bookmarked again, or with Movies on.
+  await api.mark({ list: 'ratings', type: 'tv', tmdbId: 107, score: -4 });
+  assert.equal((await api.newSeasons()).items.length, 0);
+  await api.mark({ list: 'ratings', type: 'tv', tmdbId: 107, score: 4 });
+  assert.equal((await api.newSeasons()).items.length, 1);
+  await api.mark({ list: 'maybe', type: 'tv', tmdbId: 107 });
+  assert.equal((await api.newSeasons()).items.length, 0);
+  api.unmark({ list: 'maybe', type: 'tv', tmdbId: 107 });
+  api.settings({ kind: 'movie' });
+  assert.equal((await api.newSeasons()).items.length, 0);
+
+  assert.throws(() => api.season({ type: 'tv', tmdbId: 112, through: 1 }), /seen first/);
+  await assert.rejects(api.mark({ list: 'ratings', type: 'tv', tmdbId: 112, reaction: 'seen', through: -1 }), /Bad season/);
 });

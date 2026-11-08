@@ -279,6 +279,16 @@ input[type=checkbox] { accent-color: var(--accent); }
 .rate-range::-moz-range-thumb { width: 24px; height: 24px; border-radius: 50%; background: var(--fg); border: 3px solid var(--bg); }
 .rate-range.unset::-webkit-slider-thumb { background: var(--muted); }
 .rate-ends { display: flex; justify-content: space-between; font-size: .7rem; color: var(--muted); }
+.season-note { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--accent); }
+.season-note p { margin: 0 0 10px; }
+.season-btns, .ask-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.season-btns button, .ask-btns button { flex: 1 1 auto; padding: 11px 14px; border-radius: 10px; font-size: .95rem; }
+.season-line { margin: 10px 0 0; color: var(--muted); font-size: .85rem; }
+.ask-card h2 { margin: 0 0 6px; font: 800 1.5rem/1.1 var(--display); text-transform: uppercase; letter-spacing: .02em; }
+.ask-card p { margin: 0 0 16px; color: var(--soft); }
+.ask-btns { flex-direction: column; }
+.ask-cancel { display: block; margin: 12px auto 0; }
+#news { margin-bottom: 8px; }
 .chips .foryou-chip { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .chips .foryou-chip.on { background: var(--accent); color: var(--on-accent); }
 .why { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }

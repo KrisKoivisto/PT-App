@@ -116,6 +116,14 @@ function brief(t) {
   };
 }
 
+// Season premieres: one a year from the first, except a few set relative to
+// today so the "new season" features have something to show.
+const daysAgo = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+const SEASON_DATES = { 107: { 3: daysAgo(60) }, 104: { 2: daysAgo(900) } };
+const seasonsOf = (t) => (t.type === 'tv' ? Array.from({ length: t.seasons ?? 1 }, (_, i) => ({
+  season_number: i + 1, air_date: SEASON_DATES[t.id]?.[i + 1] ?? `${t.year + i}-06-01`,
+})) : undefined);
+
 // TV kinds, as TMDB labels them; the rest are documentary series.
 const TV_TYPE = { 102: 'Miniseries', 105: 'Miniseries', 115: 'Scripted' };
 const TYPE_NUM = { Documentary: 0, Miniseries: 2, Scripted: 4 };
@@ -129,6 +137,7 @@ function details(t) {
     genres: t.genres.map((id) => ({ id, name: GENRE_NAMES[id] })),
     runtime: t.runtime ?? null,
     number_of_seasons: t.seasons ?? null,
+    seasons: seasonsOf(t),
     vote_count: 800,
     type: t.type === 'tv' ? TV_TYPE[t.id] ?? 'Documentary' : undefined,
     external_ids: { imdb_id: null },

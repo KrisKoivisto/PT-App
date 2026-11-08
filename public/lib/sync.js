@@ -24,11 +24,18 @@ export const REMOTE_OF = { watchlist: 'want', maybe: 'maybe', ratings: 'seen', p
 const fail = (message, code) => Object.assign(new Error(message), { code });
 
 // How the "Seen" comment stores how it was: short keys keep it small.
-export const encodeSeen = (i) => JSON.stringify({ r: i.reaction ?? 'seen', s: Number.isInteger(i.score) ? i.score : undefined, w: i.reasons?.length ? i.reasons : undefined, n: i.note || undefined });
+const int = (x) => (Number.isInteger(x) ? x : undefined);
+// r reaction, s score, w reasons, n note, t seen through season, k skipped season
+export const encodeSeen = (i) => JSON.stringify({ r: i.reaction ?? 'seen', s: int(i.score), w: i.reasons?.length ? i.reasons : undefined, n: i.note || undefined, t: int(i.through), k: int(i.skipped) });
 export function decodeSeen(comment) {
   try {
     const c = JSON.parse(comment);
-    return { reaction: c.r ?? 'seen', ...(Number.isInteger(c.s) ? { score: c.s } : {}), reasons: Array.isArray(c.w) ? c.w : [], note: typeof c.n === 'string' ? c.n : '' };
+    return {
+      reaction: c.r ?? 'seen', reasons: Array.isArray(c.w) ? c.w : [], note: typeof c.n === 'string' ? c.n : '',
+      ...(Number.isInteger(c.s) ? { score: c.s } : {}),
+      ...(Number.isInteger(c.t) ? { through: c.t } : {}),
+      ...(Number.isInteger(c.k) ? { skipped: c.k } : {}),
+    };
   } catch {
     return { reaction: 'seen', reasons: [], note: '' };
   }

@@ -68,6 +68,11 @@
     </div>
 
     <div id="browse-results">
+      <div id="news" hidden>
+        <h2 class="shelf">New seasons of shows you've seen</h2>
+        <div id="news-grid" class="wall" data-clear></div>
+      </div>
+      <h2 id="picks-label" class="shelf" hidden>Picked for you</h2>
       <div id="browse-grid" class="wall" data-clear></div>
       <p id="browse-msg" class="msg">Search for anything, or pick a category.</p>
       <button id="more" class="more" hidden>Show more</button>
@@ -159,6 +164,15 @@
     </div>
     <div id="panel-body"></div>
     <button id="panel-done" class="primary panel-done">Show results</button>
+  </div>
+</div>
+
+<div id="ask" class="panel" hidden>
+  <div class="panel-card ask-card" role="alertdialog" aria-modal="true" aria-labelledby="ask-title">
+    <h2 id="ask-title"></h2>
+    <p id="ask-text"></p>
+    <div id="ask-btns" class="ask-btns"></div>
+    <button class="link-btn ask-cancel" data-ask-cancel>Cancel</button>
   </div>
 </div>
 

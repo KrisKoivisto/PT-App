@@ -1,3 +1,5 @@
+import { lastAired } from './seasons.js';
+
 // A TMDB title in the shape the app uses, with where to watch it in `region`.
 export function shape(type, d, region) {
   const p = d['watch/providers']?.results?.[region] ?? {};
@@ -16,6 +18,8 @@ export function shape(type, d, region) {
     genres: (d.genres ?? []).map((g) => g.name),
     runtime: d.runtime ?? d.episode_run_time?.[0] ?? null,
     seasons: d.number_of_seasons ?? null,
+    seasonList: d.seasons ?? null,
+    lastSeason: lastAired(d.seasons), // newest season that's out: { n, date }
     // TMDB's TV type: Scripted, Miniseries, Documentary, Reality...
     tvType: type === 'tv' ? d.type ?? null : null,
     keywords: d.keywords ?? [],

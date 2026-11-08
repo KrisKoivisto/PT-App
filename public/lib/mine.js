@@ -1,3 +1,5 @@
+import { newSeason } from './seasons.js';
+
 // "Seen it" is one tap; how you felt about it is optional on top.
 export const REACTIONS = { seen: 'Seen it', love: 'Loved it', like: 'Liked it', dislike: 'Not for me' };
 
@@ -37,6 +39,10 @@ export function annotate(profile, items) {
         scored: Number.isInteger(r?.score), // false for a carried-over Loved/Liked/Not for me
         reasons: r?.reasons ?? [],
         note: r?.note ?? '',
+        // Shows: the season you're caught up through, and a newer one if it's out.
+        through: Number.isInteger(r?.through) ? r.through : null,
+        skipped: Number.isInteger(r?.skipped) ? r.skipped : null,
+        newSeason: r && it.type === 'tv' && it.seasonList ? newSeason(r, it.seasonList) : null,
         want: k.some((x) => want.has(x)),
         maybe: k.some((x) => maybe.has(x)),
         passed: k.some((x) => passed.has(x)),

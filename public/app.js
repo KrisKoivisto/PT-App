@@ -2,6 +2,7 @@ import { createApi, browserStore, safeStorage } from './lib/api.js';
 import { demoFetch } from './lib/demo.js';
 import { reasonsFor } from './lib/reasons.js';
 import { brand } from './lib/titles.js';
+import { newSeason, isRecent, ONGOING } from './lib/seasons.js';
 import { BUILT_IN_KEY, BUILT_IN_READ_TOKEN } from './lib/config.js';
 import { SORTS, RATINGS, RELEASED, defaultView, describeView, activeFilters } from './lib/filters.js';
 
@@ -13,6 +14,13 @@ const REGIONS = {
   SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', BR: 'Brazil', MX: 'Mexico',
   IN: 'India', JP: 'Japan', KR: 'South Korea',
 };
+// Dates: "Sep 2026", and "September 12" (with the year if it isn't this one).
+const day = (d) => new Date(`${d}T12:00:00`);
+const fmtMonth = (d) => day(d).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+const fmtDay = (d) => day(d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', ...(day(d).getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+// "Season 3 is out · Sep 2026", or "Seasons 3–4 are out" when you're two behind.
+const seasonLine = (ns) => (ns.from === ns.to ? `Season ${ns.to} is out` : `Seasons ${ns.from}–${ns.to} are out`) + ` · ${fmtMonth(ns.date)}`;
+
 // Your rating as shown: "+8", "0", "-5".
 const fmtScore = (s) => (s > 0 ? `+${s}` : `${s}`);
 const scoreWord = (s) => (s >= 10 ? 'Perfection' : s >= 7 ? 'Loved it' : s >= 3 ? 'Liked it' : s >= 1 ? 'It was fine' : s === 0 ? 'Right in the middle'
@@ -110,11 +118,24 @@ function quickButtons(m, attr) {
     `<button ${attr}="${k}" class="q ${k}${on ? ' on' : ''}" aria-pressed="${on}" aria-label="${on ? onLabel : label}">${icon(ic, on && ic === 'bookmark')}<span>${on ? onLabel : label}</span></button>`).join('');
 }
 
+// On a new-season poster: ✓ means you've seen the new season, ✕ skips it
+// (the show stays on your Seen list either way).
+function newsButtons(m) {
+  return [
+    ['caught', 'Seen the new season', 'check', 'seen', false],
+    ['want', 'Gotta watch', 'bookmark', 'want', !!m.want],
+    ['maybe', 'Maybe', 'maybe', 'maybe', !!m.maybe],
+    ['skip', 'Skip this season', 'x', 'pass', false],
+  ].map(([k, label, ic, cls, on]) =>
+    `<button data-quick="${k}" class="q ${cls}${on ? ' on' : ''}" aria-pressed="${on}" aria-label="${label}">${icon(ic, on && ic === 'bookmark')}<span>${label}</span></button>`).join('');
+}
+
 function tile(it) {
   const m = it.mine ?? {};
+  const news = it.news && m.newSeason;
   const where = services(it);
   const sub = it.role || [it.year, it.type === 'movie' ? 'Film' : it.tvType === 'Miniseries' ? 'Limited series' : 'Series'].filter(Boolean).join(' · ');
-  return `<div class="tile${m.passed ? ' passed' : ''}" data-key="${keyOf(it)}"${it.role ? ` data-role="${esc(it.role)}"` : ''}>
+  return `<div class="tile${m.passed ? ' passed' : ''}" data-key="${keyOf(it)}"${it.role ? ` data-role="${esc(it.role)}"` : ''}${it.news ? ' data-news="1"' : ''}>
     <button class="poster" data-open aria-label="${esc(it.title)}: details and where to watch">
       ${it.poster ? `<img loading="lazy" src="${img('w342', it.poster)}" alt="">` : `<span class="noposter">${esc(it.title)}</span>`}
       <span class="stamps">${where.length
@@ -122,7 +143,7 @@ function tile(it) {
           + (where.length > 3 ? `<span class="stamp more">+${where.length - 3}</span>` : '')
         : `<span class="stamp none">${it.rentBuy?.length ? 'Rent/buy' : 'Not streaming'}</span>`}</span>
     </button>
-    <div class="quick">${quickButtons(m, 'data-quick')}</div>
+    <div class="quick">${news ? newsButtons(m) : quickButtons(m, 'data-quick')}</div>
     <span class="t">${esc(it.title)}</span>
     <span class="y">${esc(sub)}</span>
   </div>`;
@@ -130,7 +151,7 @@ function tile(it) {
 
 // The role under a poster belongs to the actor page it's on, so it's passed
 // along per wall, not stored with the title.
-const inView = (it) => ({ ...items.get(keyOf(it)), role: it.role });
+const inView = (it) => ({ ...items.get(keyOf(it)), role: it.role, news: it.news });
 
 function renderWall(sel, list, append = false) {
   for (const it of list) remember(it);
@@ -141,13 +162,13 @@ function renderWall(sel, list, append = false) {
 
 // Keep the latest copy of each title without losing what other views know.
 function remember(it) {
-  const { role, ...rest } = it;
+  const { role, news, ...rest } = it;
   items.set(keyOf(it), { ...items.get(keyOf(it)), ...rest });
 }
 
 function updateTiles(it) {
   document.querySelectorAll(`.tile[data-key="${keyOf(it)}"]`).forEach((el) => {
-    el.outerHTML = tile({ ...it, role: el.dataset.role });
+    el.outerHTML = tile({ ...it, role: el.dataset.role, news: !!el.dataset.news });
   });
 }
 
@@ -260,6 +281,10 @@ function titleView(view) {
     <section class="block">
       <h3>Your take</h3>
       <div class="quick big">${quickButtons(m, 'data-act')}</div>
+      ${m.reaction && m.newSeason ? `<div class="season-note">
+        <p><b>${esc(seasonLine(m.newSeason))}.</b> Seen ${m.newSeason.from === m.newSeason.to ? 'it' : 'them'}?</p>
+        <div class="season-btns"><button data-season="caught" class="primary">Yes, caught up</button><button data-season="skip">Not watching ${m.newSeason.from === m.newSeason.to ? 'it' : 'them'}</button></div>
+      </div>` : m.reaction && it.type === 'tv' && m.through && it.lastSeason?.n > 1 ? `<p class="season-line">Seen through season ${m.through}</p>` : ''}
       ${m.reaction ? `<p class="why-label">How was it? <span>${s == null ? 'Slide to rate' : m.scored ? 'Your rating' : 'From your old rating; slide to change'}</span></p>
       <div class="rate">
         <div class="rate-top"><output id="rate-val" class="rate-val ${s == null ? 'none' : s > 0 ? 'pos' : s < 0 ? 'neg' : 'zero'}">${s == null ? '–' : fmtScore(s)}</output>
@@ -326,8 +351,50 @@ function personView(view) {
 }
 
 // --- marking ------------------------------------------------------------------------
-async function saveRating(it, reaction, reasons = [], note = '', score = undefined) {
-  return (await api.mark({ list: 'ratings', type: it.type, tmdbId: it.tmdbId, reaction, reasons, note, score })).mine;
+async function saveRating(it, reaction, reasons = [], note = '', score = undefined, through = undefined) {
+  return (await api.mark({ list: 'ratings', type: it.type, tmdbId: it.tmdbId, reaction, reasons, note, score, through })).mine;
+}
+
+// A small question with a few answers; resolves to the answer's value, or
+// null if you back out.
+function ask(title, text, options) {
+  return new Promise((resolve) => {
+    $('#ask-title').textContent = title;
+    $('#ask-text').textContent = text;
+    $('#ask-btns').innerHTML = options.map(([label, , cls], i) => `<button data-ask="${i}" class="${cls ?? ''}">${esc(label)}</button>`).join('');
+    $('#ask').hidden = false;
+    const done = (v) => { $('#ask').hidden = true; $('#ask').onclick = null; resolve(v); };
+    $('#ask').onclick = (e) => {
+      const b = e.target.closest('[data-ask]');
+      if (b) done(options[b.dataset.ask][1]);
+      else if (e.target.id === 'ask' || e.target.closest('[data-ask-cancel]')) done(null);
+    };
+    $('#ask-btns button').focus();
+  });
+}
+
+// Marking a show seen when its newest season came out in the last six
+// months: check you've actually seen that season. Returns the season you're
+// caught up through, undefined when there's nothing to ask, null to cancel.
+function checkSeason(it) {
+  const last = it.lastSeason;
+  if (it.type !== 'tv' || ONGOING.includes(it.tvType) || !last || last.n < 2 || !isRecent(last.date)) return undefined;
+  return ask(`Seen season ${last.n}?`, `Season ${last.n} of ${it.title} came out ${fmtDay(last.date)}. Have you watched it yet?`, [
+    [`Yes, I'm caught up`, last.n, 'primary'],
+    [`No, just through season ${last.n - 1}`, last.n - 1],
+  ]);
+}
+
+// Caught up on a show's new season, or skipping it. The show stays on Seen.
+function setSeason(it, change) {
+  api.season({ type: it.type, tmdbId: it.tmdbId, ...change });
+  const m = { ...it.mine, ...change };
+  const next = { ...it, mine: { ...m, newSeason: it.seasonList ? newSeason(m, it.seasonList) : null } };
+  items.set(keyOf(it), next);
+  updateTiles(next);
+  if (stack.at(-1)?.key === keyOf(it)) renderSheet(true);
+  pushSoon();
+  return next;
 }
 const keptScore = (m) => (m.scored ? m.score : undefined);
 
@@ -342,7 +409,11 @@ async function act(key, what, extra = {}) {
     if (m.reaction) {
       api.unmark({ ...ref, list: 'ratings' });
       mine = { ...m, reaction: null, reasons: [], note: '' };
-    } else mine = await saveRating(it, 'seen');
+    } else {
+      const through = await checkSeason(it);
+      if (through === null) return null; // backed out
+      mine = await saveRating(it, 'seen', [], '', undefined, through);
+    }
   } else if (what === 'want') {
     if (m.want) {
       api.unmark({ ...ref, list: 'watchlist' });
@@ -385,30 +456,60 @@ const DONE_MSG = { seen: 'Marked seen.', want: 'Added to Gotta watch.', maybe: '
 // a More like this list), everything below moves up, and Undo puts it back.
 // On My list it leaves the tab it no longer belongs to.
 async function quick(key, what) {
-  const { prev, next } = await act(key, what);
+  if (what === 'caught' || what === 'skip') return seasonQuick(key, what);
+  const done = await act(key, what);
+  if (!done) return;
+  const { prev, next } = done;
   const marked = next.reaction || next.want || next.maybe || next.passed;
   const belongs = { want: next.want, maybe: next.maybe, seen: !!next.reaction, passed: next.passed }[listShow];
   const leaving = [...document.querySelectorAll(`.tile[data-key="${key}"]`)].filter((el) =>
     (el.closest('[data-clear]') && marked) || (el.closest('#list-grid') && !belongs));
   if (!leaving.length) return;
-  const spots = leaving.map((el) => ({ wall: el.parentElement, before: el.nextElementSibling, role: el.dataset.role }));
+  const spots = leaving.map((el) => ({ wall: el.parentElement, before: el.nextElementSibling, role: el.dataset.role, news: !!el.dataset.news }));
   leaving.forEach(removeTile);
   topUp();
   toast(marked ? DONE_MSG[what] : 'Removed.', async () => {
     await restore(key, prev);
-    for (const { wall, before, role } of spots) {
-      if (!wall.isConnected) continue;
-      const html = tile({ ...items.get(key), role });
-      if (before?.isConnected) before.insertAdjacentHTML('beforebegin', html);
-      else wall.insertAdjacentHTML('beforeend', html);
-    }
+    putBack(key, spots);
+  });
+}
+
+function putBack(key, spots) {
+  for (const { wall, before, role, news } of spots) {
+    if (!wall.isConnected) continue;
+    const html = tile({ ...items.get(key), role, news });
+    if (before?.isConnected) before.insertAdjacentHTML('beforebegin', html);
+    else wall.insertAdjacentHTML('beforeend', html);
+  }
+  if (spots.some((s) => s.news)) $('#news').hidden = false;
+}
+
+// ✓ or ✕ on a new-season poster.
+async function seasonQuick(key, what) {
+  const it = items.get(key);
+  const ns = it?.mine?.newSeason;
+  if (!ns) return;
+  const before = { through: it.mine.through, skipped: it.mine.skipped };
+  setSeason(it, what === 'caught' ? { through: ns.to } : { skipped: ns.to });
+  const leaving = [...document.querySelectorAll(`#news-grid .tile[data-key="${key}"]`)];
+  const spots = leaving.map((el) => ({ wall: el.parentElement, before: el.nextElementSibling, role: el.dataset.role, news: true }));
+  leaving.forEach(removeTile);
+  toast(what === 'caught' ? `Caught up on ${it.title}.` : `Skipping season ${ns.to}.`, () => {
+    setSeason(items.get(key), before);
+    putBack(key, spots);
   });
 }
 
 function removeTile(el) {
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return el.remove();
+  const gone = () => {
+    el.remove();
+    // The new-seasons row goes away once you've dealt with all of them.
+    $('#news').hidden = !$('#news-grid .tile');
+    $('#picks-label').hidden = $('#news').hidden || !$('#browse-grid .tile');
+  };
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return gone();
   el.classList.add('leaving');
-  setTimeout(() => el.remove(), 200);
+  setTimeout(gone, 200);
 }
 
 // Put a title's marks back exactly as they were before.
@@ -417,7 +518,10 @@ async function restore(key, prev) {
   const ref = { type: it.type, tmdbId: it.tmdbId, imdbId: it.imdbId };
   for (const list of ['ratings', 'watchlist', 'maybe', 'passed']) api.unmark({ ...ref, list });
   let mine = { reaction: null, reasons: [], note: '', want: false, maybe: false, passed: false };
-  if (prev.reaction) mine = await saveRating(it, prev.reaction, prev.reasons, prev.note, keptScore(prev));
+  if (prev.reaction) {
+    mine = await saveRating(it, prev.reaction, prev.reasons, prev.note, keptScore(prev), prev.through ?? undefined);
+    if (prev.skipped != null) mine = setSeason({ ...it, mine }, { skipped: prev.skipped }).mine;
+  }
   if (prev.want) mine = (await api.mark({ ...ref, list: 'watchlist' })).mine;
   if (prev.maybe) mine = (await api.mark({ ...ref, list: 'maybe' })).mine;
   if (prev.passed) mine = (await api.mark({ ...ref, list: 'passed' })).mine;
@@ -437,6 +541,15 @@ document.addEventListener('click', async (e) => {
     if (q) return await quick(q.closest('.tile').dataset.key, q.dataset.quick);
     if (a) return await (['seen', 'want', 'maybe', 'pass'].includes(a.dataset.act) ? quick : act)(stack.at(-1).key, a.dataset.act);
     if (r) return await act(stack.at(-1).key, 'reason', { reason: r.dataset.reason, note: $('#note')?.value });
+    const sb = e.target.closest('#sheet-body [data-season]');
+    if (sb) {
+      const it = items.get(stack.at(-1).key);
+      const ns = it.mine.newSeason;
+      const before = { through: it.mine.through, skipped: it.mine.skipped };
+      setSeason(it, sb.dataset.season === 'caught' ? { through: ns.to } : { skipped: ns.to });
+      document.querySelectorAll(`#news-grid .tile[data-key="${keyOf(it)}"]`).forEach(removeTile);
+      return toast(sb.dataset.season === 'caught' ? `Caught up on ${it.title}.` : `Skipping season ${ns.to}.`, () => setSeason(items.get(keyOf(it)), before));
+    }
   } catch (err) { return toast(err.message); }
   const t = e.target.closest('[data-open]');
   if (t) return openSheet({ kind: 'title', key: t.closest('.tile').dataset.key });
@@ -633,7 +746,7 @@ let subsByCat = {};
 
 function loadCategories() {
   ({ categories, subs: subsByCat } = api.categories());
-  $('#cats').innerHTML = kindPicker() + '<button data-cat="foryou" class="foryou-chip">For you</button>'
+  $('#cats').innerHTML = kindPicker() + '<button data-cat="foryou" class="foryou-chip">Have you seen?</button>'
     + categories.map((c) => `<button data-cat="${c.key}">${esc(c.name)}</button>`).join('');
 }
 
@@ -672,15 +785,28 @@ async function loadBrowse(append = false) {
   if (!browseState.category || (append && browseState.loading)) return;
   const req = ++browseReq;
   browseState.loading = true;
-  if (!append) { browseState.page = 1; $('#browse-grid').innerHTML = ''; }
+  if (!append) {
+    browseState.page = 1;
+    $('#browse-grid').innerHTML = '';
+    $('#news').hidden = true;
+    $('#picks-label').hidden = true;
+  }
   $('#more').hidden = true;
   show('#browse-msg', 'Loading…');
   try {
     // "For you" is built from your ratings; everything else is a category.
-    const r = browseState.category === 'foryou'
-      ? { ...(await api.forYou()), totalPages: 1 }
-      : await api.browse({ category: browseState.category, sub: browseState.sub, page: browseState.page });
+    // "Have you seen?" is new seasons of your shows, then picks from your ratings.
+    const fy = browseState.category === 'foryou';
+    const [r, news] = await Promise.all([
+      fy ? api.forYou().then((x) => ({ ...x, totalPages: 1 })) : api.browse({ category: browseState.category, sub: browseState.sub, page: browseState.page }),
+      fy && !append ? api.newSeasons().catch(() => ({ items: [] })) : null,
+    ]);
     if (req !== browseReq) return;
+    if (news?.items.length) {
+      renderWall('#news-grid', news.items.map((i) => ({ ...i, role: seasonLine(i.mine.newSeason), news: true })));
+      $('#news').hidden = false;
+      $('#picks-label').hidden = r.reason === 'no-likes' || !r.items.length;
+    }
     if (r.reason === 'no-likes') {
       show('#browse-msg', "Rate a few things you've seen, above 0 for what you liked and below 0 for what you didn't, and suggestions built from your ratings show up here.");
       return;
